@@ -1,0 +1,7 @@
+.cache/
+build/
+
+.DS_Store
+output/
+
+*.exr

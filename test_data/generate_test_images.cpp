@@ -154,6 +154,7 @@ void printUsage(const char* programName) {
               << "Usage: " << programName << " [options]\n\n"
               << "Options:\n"
               << "  --output DIR    Output directory (default: test_data)\n"
+              << "  --flat          Also output flattened EXR files for visualization\n"
               << "  --verbose, -v   Verbose output\n"
               << "  --help, -h      Show this help\n";
 }
@@ -161,16 +162,19 @@ void printUsage(const char* programName) {
 int main(int argc, char* argv[]) {
     std::string outputDir = "test_data";
     bool verbose = false;
-    
+    bool outputFlat = false;
+
     // Parse arguments
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        
+
         if (arg == "--help" || arg == "-h") {
             printUsage(argv[0]);
             return 0;
         } else if (arg == "--verbose" || arg == "-v") {
             verbose = true;
+        } else if (arg == "--flat") {
+            outputFlat = true;
         } else if (arg == "--output" && i + 1 < argc) {
             outputDir = argv[++i];
         }
@@ -201,14 +205,20 @@ int main(int argc, char* argv[]) {
         sphere.alpha = 0.7f;
         
         DeepImage img = generateSphere(sphere);
-        
+
         std::string path = outputDir + "/sphere_front.exr";
         writeDeepEXR(img, path);
-        
+
         log("  Created: " + path);
         log("  Resolution: " + std::to_string(IMAGE_WIDTH) + "x" + std::to_string(IMAGE_HEIGHT));
         log("  Samples: " + formatNumber(img.totalSampleCount()));
         log("  Depth range: 5.0 - 10.0");
+
+        if (outputFlat) {
+            std::string flatPath = outputDir + "/sphere_front.flat.exr";
+            writeFlatEXR(img, flatPath);
+            log("  Created flat: " + flatPath);
+        }
     }
     
     // ========================================================================
@@ -229,14 +239,20 @@ int main(int argc, char* argv[]) {
         sphere.alpha = 0.7f;
         
         DeepImage img = generateSphere(sphere);
-        
+
         std::string path = outputDir + "/sphere_back.exr";
         writeDeepEXR(img, path);
-        
+
         log("  Created: " + path);
         log("  Resolution: " + std::to_string(IMAGE_WIDTH) + "x" + std::to_string(IMAGE_HEIGHT));
         log("  Samples: " + formatNumber(img.totalSampleCount()));
         log("  Depth range: 15.0 - 20.0");
+
+        if (outputFlat) {
+            std::string flatPath = outputDir + "/sphere_back.flat.exr";
+            writeFlatEXR(img, flatPath);
+            log("  Created flat: " + flatPath);
+        }
     }
     
     // ========================================================================
@@ -252,14 +268,20 @@ int main(int argc, char* argv[]) {
             0.2f,    // blue
             1.0f     // alpha (opaque)
         );
-        
+
         std::string path = outputDir + "/ground_plane.exr";
         writeDeepEXR(img, path);
-        
+
         log("  Created: " + path);
         log("  Resolution: " + std::to_string(IMAGE_WIDTH) + "x" + std::to_string(IMAGE_HEIGHT));
         log("  Samples: " + formatNumber(img.totalSampleCount()));
         log("  Depth: 25.0");
+
+        if (outputFlat) {
+            std::string flatPath = outputDir + "/ground_plane.flat.exr";
+            writeFlatEXR(img, flatPath);
+            log("  Created flat: " + flatPath);
+        }
     }
     
     log("\nDone! Generated 3 test images in " + timer.elapsedString());

@@ -12,30 +12,42 @@ namespace deep_compositor {
  * A single deep sample containing depth and premultiplied RGBA values
  */
 struct DeepSample {
-    float depth;    // Z value (depth from camera)
-    float red;      // Premultiplied red
-    float green;    // Premultiplied green
-    float blue;     // Premultiplied blue
-    float alpha;    // Coverage/opacity
-    
-    DeepSample() 
-        : depth(0.0f), red(0.0f), green(0.0f), blue(0.0f), alpha(0.0f) {}
-    
+    float depth;       // Z front (depth from camera)
+    float depth_back;  // Z back. Equal to depth for point/hard-surface samples.
+    float red;         // Premultiplied red
+    float green;       // Premultiplied green
+    float blue;        // Premultiplied blue
+    float alpha;       // Coverage/opacity
+
+    DeepSample()
+        : depth(0.0f), depth_back(0.0f), red(0.0f), green(0.0f), blue(0.0f), alpha(0.0f) {}
+
+    // Zero-thickness convenience constructor (depth_back = depth)
     DeepSample(float z, float r, float g, float b, float a)
-        : depth(z), red(r), green(g), blue(b), alpha(a) {}
-    
+        : depth(z), depth_back(z), red(r), green(g), blue(b), alpha(a) {}
+
+    // Full volumetric constructor
+    DeepSample(float z_front, float z_back, float r, float g, float b, float a)
+        : depth(z_front), depth_back(z_back), red(r), green(g), blue(b), alpha(a) {}
+
+    bool isVolume() const { return depth_back > depth; }
+    float thickness() const { return depth_back - depth; }
+
     /**
-     * Compare samples by depth (for sorting front-to-back)
+     * Compare samples by depth (for sorting front-to-back),
+     * with depth_back as tiebreaker
      */
     bool operator<(const DeepSample& other) const {
-        return depth < other.depth;
+        if (depth != other.depth) return depth < other.depth;
+        return depth_back < other.depth_back;
     }
-    
+
     /**
-     * Check if two samples are at approximately the same depth
+     * Check if two samples are at approximately the same depth range
      */
     bool isNearDepth(const DeepSample& other, float epsilon = 0.001f) const {
-        return std::abs(depth - other.depth) < epsilon;
+        return std::abs(depth - other.depth) < epsilon
+            && std::abs(depth_back - other.depth_back) < epsilon;
     }
 };
 

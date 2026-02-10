@@ -88,7 +88,8 @@ DeepImage loadDeepEXR(const std::string& filename) {
     bool hasB = channels.findChannel("B") != nullptr;
     bool hasA = channels.findChannel("A") != nullptr;
     bool hasZ = channels.findChannel("Z") != nullptr;
-    
+    bool hasZBack = channels.findChannel("ZBack") != nullptr;
+
     if (!hasR || !hasG || !hasB || !hasA || !hasZ) {
         std::string missing;
         if (!hasR) missing += "R ";
@@ -136,13 +137,15 @@ DeepImage loadDeepEXR(const std::string& filename) {
     std::vector<float*> bPtrs(sampleCounts.size());
     std::vector<float*> aPtrs(sampleCounts.size());
     std::vector<float*> zPtrs(sampleCounts.size());
-    
+    std::vector<float*> zBackPtrs(sampleCounts.size());
+
     // Allocate contiguous storage for all samples
     std::vector<float> rData(totalSamples);
     std::vector<float> gData(totalSamples);
     std::vector<float> bData(totalSamples);
     std::vector<float> aData(totalSamples);
     std::vector<float> zData(totalSamples);
+    std::vector<float> zBackData(hasZBack ? totalSamples : 0);
     
     // Set up pointers into the contiguous arrays
     size_t offset = 0;
@@ -153,6 +156,7 @@ DeepImage loadDeepEXR(const std::string& filename) {
             bPtrs[i] = bData.data() + offset;
             aPtrs[i] = aData.data() + offset;
             zPtrs[i] = zData.data() + offset;
+            if (hasZBack) zBackPtrs[i] = zBackData.data() + offset;
             offset += sampleCounts[i];
         } else {
             rPtrs[i] = nullptr;
@@ -160,6 +164,7 @@ DeepImage loadDeepEXR(const std::string& filename) {
             bPtrs[i] = nullptr;
             aPtrs[i] = nullptr;
             zPtrs[i] = nullptr;
+            if (hasZBack) zBackPtrs[i] = nullptr;
         }
     }
     
@@ -229,7 +234,20 @@ DeepImage loadDeepEXR(const std::string& filename) {
             sizeof(float)
         )
     );
-    
+
+    if (hasZBack) {
+        deepFrameBuffer.insert(
+            "ZBack",
+            Imf::DeepSlice(
+                Imf::FLOAT,
+                reinterpret_cast<char*>(zBackPtrs.data() - minX - static_cast<long>(minY) * width),
+                sizeof(float*),
+                sizeof(float*) * width,
+                sizeof(float)
+            )
+        );
+    }
+
     file->setFrameBuffer(deepFrameBuffer);
     
     // Read the deep pixel data
@@ -247,11 +265,12 @@ DeepImage loadDeepEXR(const std::string& filename) {
                 for (unsigned int s = 0; s < numSamples; ++s) {
                     DeepSample sample;
                     sample.depth = zPtrs[pixelIndex][s];
+                    sample.depth_back = hasZBack ? zBackPtrs[pixelIndex][s] : sample.depth;
                     sample.red = rPtrs[pixelIndex][s];
                     sample.green = gPtrs[pixelIndex][s];
                     sample.blue = bPtrs[pixelIndex][s];
                     sample.alpha = aPtrs[pixelIndex][s];
-                    
+
                     pixel.addSample(sample);
                 }
             }

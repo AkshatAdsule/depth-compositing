@@ -98,6 +98,7 @@ void writeDeepEXR(const DeepImage& img, const std::string& filename) {
     header.channels().insert("B", Imf::Channel(Imf::FLOAT));
     header.channels().insert("A", Imf::Channel(Imf::FLOAT));
     header.channels().insert("Z", Imf::Channel(Imf::FLOAT));
+    header.channels().insert("ZBack", Imf::Channel(Imf::FLOAT));
     
     // Prepare sample count array
     std::vector<unsigned int> sampleCounts(static_cast<size_t>(width) * height);
@@ -118,13 +119,15 @@ void writeDeepEXR(const DeepImage& img, const std::string& filename) {
     std::vector<float> bData(totalSamples);
     std::vector<float> aData(totalSamples);
     std::vector<float> zData(totalSamples);
-    
+    std::vector<float> zBackData(totalSamples);
+
     // Allocate pointer arrays
     std::vector<float*> rPtrs(sampleCounts.size());
     std::vector<float*> gPtrs(sampleCounts.size());
     std::vector<float*> bPtrs(sampleCounts.size());
     std::vector<float*> aPtrs(sampleCounts.size());
     std::vector<float*> zPtrs(sampleCounts.size());
+    std::vector<float*> zBackPtrs(sampleCounts.size());
     
     // Fill data and set up pointers
     size_t offset = 0;
@@ -139,7 +142,8 @@ void writeDeepEXR(const DeepImage& img, const std::string& filename) {
                 bPtrs[idx] = bData.data() + offset;
                 aPtrs[idx] = aData.data() + offset;
                 zPtrs[idx] = zData.data() + offset;
-                
+                zBackPtrs[idx] = zBackData.data() + offset;
+
                 for (size_t s = 0; s < pixel.sampleCount(); ++s) {
                     const DeepSample& sample = pixel[s];
                     rData[offset + s] = sample.red;
@@ -147,8 +151,9 @@ void writeDeepEXR(const DeepImage& img, const std::string& filename) {
                     bData[offset + s] = sample.blue;
                     aData[offset + s] = sample.alpha;
                     zData[offset + s] = sample.depth;
+                    zBackData[offset + s] = sample.depth_back;
                 }
-                
+
                 offset += sampleCounts[idx];
             } else {
                 rPtrs[idx] = nullptr;
@@ -156,6 +161,7 @@ void writeDeepEXR(const DeepImage& img, const std::string& filename) {
                 bPtrs[idx] = nullptr;
                 aPtrs[idx] = nullptr;
                 zPtrs[idx] = nullptr;
+                zBackPtrs[idx] = nullptr;
             }
         }
     }
@@ -230,7 +236,18 @@ void writeDeepEXR(const DeepImage& img, const std::string& filename) {
                 sizeof(float)
             )
         );
-        
+
+        frameBuffer.insert(
+            "ZBack",
+            Imf::DeepSlice(
+                Imf::FLOAT,
+                reinterpret_cast<char*>(zBackPtrs.data()),
+                sizeof(float*),
+                sizeof(float*) * width,
+                sizeof(float)
+            )
+        );
+
         outFile.setFrameBuffer(frameBuffer);
         outFile.writePixels(height);
         

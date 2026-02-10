@@ -1,4 +1,5 @@
 #include "deep_compositor.h"
+#include "deep_volume.h"
 #include "utils.h"
 
 #include <algorithm>
@@ -42,40 +43,7 @@ bool validateDimensions(const std::vector<const DeepImage*>& inputs) {
 
 DeepPixel mergePixels(const std::vector<const DeepPixel*>& pixels,
                       float mergeThreshold) {
-    DeepPixel result;
-    
-    // Count total samples
-    size_t totalSamples = 0;
-    for (const auto* pixel : pixels) {
-        totalSamples += pixel->sampleCount();
-    }
-    
-    if (totalSamples == 0) {
-        return result;
-    }
-    
-    // Collect all samples
-    std::vector<DeepSample> allSamples;
-    allSamples.reserve(totalSamples);
-    
-    for (const auto* pixel : pixels) {
-        for (const auto& sample : pixel->samples()) {
-            allSamples.push_back(sample);
-        }
-    }
-    
-    // Sort by depth (front to back)
-    std::sort(allSamples.begin(), allSamples.end());
-    
-    // Add all samples to result
-    result.samples() = std::move(allSamples);
-    
-    // Optionally merge samples within threshold
-    if (mergeThreshold > 0.0f) {
-        result.mergeSamplesWithinEpsilon(mergeThreshold);
-    }
-    
-    return result;
+    return mergePixelsVolumetric(pixels, mergeThreshold);
 }
 
 DeepImage deepMerge(const std::vector<DeepImage>& inputs,

@@ -33,6 +33,7 @@ set(COMPOSITOR_SOURCES
     src/deep_reader.cpp
     src/deep_writer.cpp
     src/deep_compositor.cpp
+    src/deep_volume.cpp
 )
 
 # Main executable

@@ -42,11 +42,13 @@ void DeepPixel::mergeSamplesWithinEpsilon(float epsilon) {
         float weightedG = current.green;
         float weightedB = current.blue;
         float avgDepth = current.depth;
+        float avgDepthBack = current.depth_back;
         int count = 1;
         
         // Merge with subsequent samples within epsilon
-        while (i + 1 < samples_.size() && 
-               samples_[i + 1].depth - current.depth < epsilon) {
+        while (i + 1 < samples_.size() &&
+               samples_[i + 1].depth - current.depth < epsilon &&
+               std::abs(samples_[i + 1].depth_back - current.depth_back) < epsilon) {
             i++;
             const DeepSample& next = samples_[i];
             
@@ -56,12 +58,14 @@ void DeepPixel::mergeSamplesWithinEpsilon(float epsilon) {
             weightedG += next.green;
             weightedB += next.blue;
             avgDepth += next.depth;
+            avgDepthBack += next.depth_back;
             count++;
         }
         
         // Create merged sample
         if (count > 1) {
             current.depth = avgDepth / count;
+            current.depth_back = avgDepthBack / count;
             current.red = weightedR / count;
             current.green = weightedG / count;
             current.blue = weightedB / count;
@@ -86,7 +90,12 @@ float DeepPixel::maxDepth() const {
     if (samples_.empty()) {
         return -std::numeric_limits<float>::infinity();
     }
-    return samples_.back().depth;  // Already sorted front-to-back
+    // Return the farthest depth_back across all samples
+    float maxVal = -std::numeric_limits<float>::infinity();
+    for (const auto& s : samples_) {
+        maxVal = std::max(maxVal, s.depth_back);
+    }
+    return maxVal;
 }
 
 bool DeepPixel::isValidSortOrder() const {

@@ -125,28 +125,185 @@ DeepImage generateSphere(const SphereParams& sphere) {
 }
 
 /**
+ * Generate a deep image containing a volumetric sphere
+ * (single sample per hit pixel spanning [depthEntry, depthExit])
+ */
+DeepImage generateVolumetricSphere(const SphereParams& sphere) {
+    DeepImage img(IMAGE_WIDTH, IMAGE_HEIGHT);
+
+    for (int y = 0; y < IMAGE_HEIGHT; ++y) {
+        for (int x = 0; x < IMAGE_WIDTH; ++x) {
+            float normX = (static_cast<float>(x) + 0.5f) / IMAGE_WIDTH;
+            float normY = (static_cast<float>(y) + 0.5f) / IMAGE_HEIGHT;
+
+            float depthEntry, depthExit;
+            if (raySphereIntersect(normX, normY, sphere, depthEntry, depthExit)) {
+                // Single volumetric sample spanning the full depth range
+                DeepSample sample;
+                sample.depth      = depthEntry;
+                sample.depth_back = depthExit;
+                sample.red   = sphere.red * sphere.alpha;
+                sample.green = sphere.green * sphere.alpha;
+                sample.blue  = sphere.blue * sphere.alpha;
+                sample.alpha = sphere.alpha;
+                img.pixel(x, y).addSample(sample);
+            }
+        }
+    }
+
+    return img;
+}
+
+/**
+ * Generate a deep image containing a fog slab (volumetric)
+ * covering a circular region at the given depth range.
+ */
+DeepImage generateFogSlab(float centerX, float centerY, float radius,
+                          float depthFront, float depthBack,
+                          float r, float g, float b, float alpha) {
+    DeepImage img(IMAGE_WIDTH, IMAGE_HEIGHT);
+
+    for (int y = 0; y < IMAGE_HEIGHT; ++y) {
+        for (int x = 0; x < IMAGE_WIDTH; ++x) {
+            float normX = (static_cast<float>(x) + 0.5f) / IMAGE_WIDTH;
+            float normY = (static_cast<float>(y) + 0.5f) / IMAGE_HEIGHT;
+
+            float dx = normX - centerX;
+            float dy = normY - centerY;
+            if (dx * dx + dy * dy <= radius * radius) {
+                DeepSample sample;
+                sample.depth      = depthFront;
+                sample.depth_back = depthBack;
+                sample.red   = r * alpha;
+                sample.green = g * alpha;
+                sample.blue  = b * alpha;
+                sample.alpha = alpha;
+                img.pixel(x, y).addSample(sample);
+            }
+        }
+    }
+
+    return img;
+}
+
+/**
  * Generate a deep image containing a ground plane
  */
 DeepImage generateGroundPlane(float depth, float r, float g, float b, float alpha) {
     DeepImage img(IMAGE_WIDTH, IMAGE_HEIGHT);
-    
+
     for (int y = 0; y < IMAGE_HEIGHT; ++y) {
         for (int x = 0; x < IMAGE_WIDTH; ++x) {
             DeepPixel& pixel = img.pixel(x, y);
-            
-            DeepSample sample;
-            sample.depth = depth;
-            // Premultiply colors
-            sample.red = r * alpha;
-            sample.green = g * alpha;
-            sample.blue = b * alpha;
-            sample.alpha = alpha;
-            
+
+            // Point sample: depth_back = depth
+            DeepSample sample(depth, r * alpha, g * alpha, b * alpha, alpha);
             pixel.addSample(sample);
         }
     }
-    
+
     return img;
+}
+
+/**
+ * Generate a deep image containing an opaque wall (point sample)
+ * covering a circular region at a single depth.
+ */
+DeepImage generateWall(float centerX, float centerY, float radius,
+                       float depth, float r, float g, float b) {
+    DeepImage img(IMAGE_WIDTH, IMAGE_HEIGHT);
+
+    for (int y = 0; y < IMAGE_HEIGHT; ++y) {
+        for (int x = 0; x < IMAGE_WIDTH; ++x) {
+            float normX = (static_cast<float>(x) + 0.5f) / IMAGE_WIDTH;
+            float normY = (static_cast<float>(y) + 0.5f) / IMAGE_HEIGHT;
+
+            float dx = normX - centerX;
+            float dy = normY - centerY;
+            if (dx * dx + dy * dy <= radius * radius) {
+                // Opaque point sample
+                DeepSample sample(depth, r, g, b, 1.0f);
+                img.pixel(x, y).addSample(sample);
+            }
+        }
+    }
+
+    return img;
+}
+
+/**
+ * Generate all demo-specific images for the showcase.
+ */
+void generateDemo(const std::string& outputDir, bool outputFlat) {
+    log("=== Generating Demo Scene Images ===");
+
+    // ---- Scene 1: Nebula -- three overlapping volumetric fog spheres ----
+    {
+        log("\n[Nebula] Red-orange volumetric sphere...");
+        SphereParams s{};
+        s.centerX = 0.33f;  s.centerY = 0.45f;  s.radius = 0.28f;
+        s.depthNear = 4.0f; s.depthFar = 20.0f;
+        s.red = 1.0f; s.green = 0.2f; s.blue = 0.05f; s.alpha = 0.6f;
+        DeepImage img = generateVolumetricSphere(s);
+        writeDeepEXR(img, outputDir + "/nebula_red.exr");
+        log("  -> " + outputDir + "/nebula_red.exr  (depth 4-20, alpha 0.6)");
+        if (outputFlat) writeFlatEXR(img, outputDir + "/nebula_red.flat.exr");
+    }
+    {
+        log("[Nebula] Green volumetric sphere...");
+        SphereParams s{};
+        s.centerX = 0.67f;  s.centerY = 0.45f;  s.radius = 0.28f;
+        s.depthNear = 8.0f; s.depthFar = 24.0f;
+        s.red = 0.15f; s.green = 1.0f; s.blue = 0.2f; s.alpha = 0.55f;
+        DeepImage img = generateVolumetricSphere(s);
+        writeDeepEXR(img, outputDir + "/nebula_green.exr");
+        log("  -> " + outputDir + "/nebula_green.exr  (depth 8-24, alpha 0.55)");
+        if (outputFlat) writeFlatEXR(img, outputDir + "/nebula_green.flat.exr");
+    }
+    {
+        log("[Nebula] Blue-violet volumetric sphere...");
+        SphereParams s{};
+        s.centerX = 0.50f;  s.centerY = 0.72f;  s.radius = 0.25f;
+        s.depthNear = 2.0f; s.depthFar = 16.0f;
+        s.red = 0.15f; s.green = 0.15f; s.blue = 1.0f; s.alpha = 0.5f;
+        DeepImage img = generateVolumetricSphere(s);
+        writeDeepEXR(img, outputDir + "/nebula_blue.exr");
+        log("  -> " + outputDir + "/nebula_blue.exr  (depth 2-16, alpha 0.5)");
+        if (outputFlat) writeFlatEXR(img, outputDir + "/nebula_blue.flat.exr");
+    }
+
+    // ---- Scene 2: Crystal -- opaque sphere inside volumetric fog ----
+    {
+        log("\n[Crystal] Purple volumetric fog sphere...");
+        SphereParams s{};
+        s.centerX = 0.5f;  s.centerY = 0.5f;  s.radius = 0.40f;
+        s.depthNear = 3.0f; s.depthFar = 25.0f;
+        s.red = 0.6f; s.green = 0.1f; s.blue = 0.8f; s.alpha = 0.7f;
+        DeepImage img = generateVolumetricSphere(s);
+        writeDeepEXR(img, outputDir + "/purple_fog.exr");
+        log("  -> " + outputDir + "/purple_fog.exr  (depth 3-25, alpha 0.7)");
+        if (outputFlat) writeFlatEXR(img, outputDir + "/purple_fog.flat.exr");
+    }
+    {
+        log("[Crystal] Gold opaque sphere...");
+        SphereParams s{};
+        s.centerX = 0.5f;  s.centerY = 0.5f;  s.radius = 0.15f;
+        s.depthNear = 10.0f; s.depthFar = 16.0f;
+        s.red = 1.0f; s.green = 0.85f; s.blue = 0.2f; s.alpha = 1.0f;
+        DeepImage img = generateSphere(s);
+        writeDeepEXR(img, outputDir + "/gold_sphere.exr");
+        log("  -> " + outputDir + "/gold_sphere.exr  (depth 10-16, opaque)");
+        if (outputFlat) writeFlatEXR(img, outputDir + "/gold_sphere.flat.exr");
+    }
+
+    // ---- Shared dark backdrop ----
+    {
+        log("\n[Shared] Dark backdrop...");
+        DeepImage img = generateGroundPlane(30.0f, 0.03f, 0.03f, 0.08f, 1.0f);
+        writeDeepEXR(img, outputDir + "/backdrop.exr");
+        log("  -> " + outputDir + "/backdrop.exr  (depth 30, near-black)");
+        if (outputFlat) writeFlatEXR(img, outputDir + "/backdrop.flat.exr");
+    }
 }
 
 void printUsage(const char* programName) {
@@ -154,6 +311,7 @@ void printUsage(const char* programName) {
               << "Usage: " << programName << " [options]\n\n"
               << "Options:\n"
               << "  --output DIR    Output directory (default: test_data)\n"
+              << "  --demo          Generate demo showcase images only\n"
               << "  --flat          Also output flattened EXR files for visualization\n"
               << "  --verbose, -v   Verbose output\n"
               << "  --help, -h      Show this help\n";
@@ -163,6 +321,7 @@ int main(int argc, char* argv[]) {
     std::string outputDir = "test_data";
     bool verbose = false;
     bool outputFlat = false;
+    bool demoMode = false;
 
     // Parse arguments
     for (int i = 1; i < argc; ++i) {
@@ -175,17 +334,26 @@ int main(int argc, char* argv[]) {
             verbose = true;
         } else if (arg == "--flat") {
             outputFlat = true;
+        } else if (arg == "--demo") {
+            demoMode = true;
         } else if (arg == "--output" && i + 1 < argc) {
             outputDir = argv[++i];
         }
     }
-    
+
     setVerbose(verbose);
-    
+
+    Timer timer;
+
+    if (demoMode) {
+        log("Output directory: " + outputDir);
+        generateDemo(outputDir, outputFlat);
+        log("\nDemo images generated in " + timer.elapsedString());
+        return 0;
+    }
+
     log("Generating test deep EXR images...");
     log("Output directory: " + outputDir);
-    
-    Timer timer;
     
     // ========================================================================
     // Generate sphere_front.exr - Red sphere, semi-transparent
@@ -284,7 +452,123 @@ int main(int argc, char* argv[]) {
         }
     }
     
-    log("\nDone! Generated 3 test images in " + timer.elapsedString());
-    
+    // ========================================================================
+    // Generate overlapping fog volumes (red fog + blue fog)
+    // ========================================================================
+    {
+        log("\nGenerating fog_red.exr (volumetric)...");
+
+        // Red fog: depth 5-15, alpha 0.5, circular region
+        DeepImage img = generateFogSlab(
+            0.4f, 0.5f, 0.3f,   // center X, Y, radius
+            5.0f, 15.0f,         // depth front, back
+            1.0f, 0.1f, 0.1f,   // color R, G, B
+            0.5f                 // alpha
+        );
+
+        std::string path = outputDir + "/fog_red.exr";
+        writeDeepEXR(img, path);
+        log("  Created: " + path);
+        log("  Volumetric depth range: 5.0 - 15.0");
+
+        if (outputFlat) {
+            writeFlatEXR(img, outputDir + "/fog_red.flat.exr");
+        }
+    }
+
+    {
+        log("\nGenerating fog_blue.exr (volumetric)...");
+
+        // Blue fog: depth 10-20, alpha 0.5, overlapping circular region
+        DeepImage img = generateFogSlab(
+            0.6f, 0.5f, 0.3f,   // center X, Y, radius
+            10.0f, 20.0f,        // depth front, back
+            0.1f, 0.1f, 1.0f,   // color R, G, B
+            0.5f                 // alpha
+        );
+
+        std::string path = outputDir + "/fog_blue.exr";
+        writeDeepEXR(img, path);
+        log("  Created: " + path);
+        log("  Volumetric depth range: 10.0 - 20.0");
+
+        if (outputFlat) {
+            writeFlatEXR(img, outputDir + "/fog_blue.flat.exr");
+        }
+    }
+
+    // ========================================================================
+    // Generate volumetric sphere
+    // ========================================================================
+    {
+        log("\nGenerating sphere_volume.exr (volumetric)...");
+
+        SphereParams sphere;
+        sphere.centerX = 0.5f;
+        sphere.centerY = 0.5f;
+        sphere.radius = 0.25f;
+        sphere.depthNear = 8.0f;
+        sphere.depthFar = 16.0f;
+        sphere.red = 0.8f;
+        sphere.green = 0.4f;
+        sphere.blue = 0.1f;
+        sphere.alpha = 0.6f;
+
+        DeepImage img = generateVolumetricSphere(sphere);
+
+        std::string path = outputDir + "/sphere_volume.exr";
+        writeDeepEXR(img, path);
+        log("  Created: " + path);
+        log("  Volumetric depth range: 8.0 - 16.0");
+
+        if (outputFlat) {
+            writeFlatEXR(img, outputDir + "/sphere_volume.flat.exr");
+        }
+    }
+
+    // ========================================================================
+    // Generate point-inside-volume test (wall inside fog)
+    // ========================================================================
+    {
+        log("\nGenerating wall_in_fog.exr (opaque wall at depth 10)...");
+
+        DeepImage img = generateWall(
+            0.5f, 0.5f, 0.3f,   // center X, Y, radius
+            10.0f,               // wall depth
+            0.9f, 0.9f, 0.1f    // color (yellow)
+        );
+
+        std::string path = outputDir + "/wall_in_fog.exr";
+        writeDeepEXR(img, path);
+        log("  Created: " + path);
+        log("  Point depth: 10.0");
+
+        if (outputFlat) {
+            writeFlatEXR(img, outputDir + "/wall_in_fog.flat.exr");
+        }
+    }
+
+    {
+        log("\nGenerating fog_around_wall.exr (fog slab depth 5-15)...");
+
+        DeepImage img = generateFogSlab(
+            0.5f, 0.5f, 0.3f,
+            5.0f, 15.0f,
+            0.2f, 0.8f, 0.2f,   // green fog
+            0.6f
+        );
+
+        std::string path = outputDir + "/fog_around_wall.exr";
+        writeDeepEXR(img, path);
+        log("  Created: " + path);
+        log("  Volumetric depth range: 5.0 - 15.0");
+
+        if (outputFlat) {
+            writeFlatEXR(img, outputDir + "/fog_around_wall.flat.exr");
+        }
+    }
+
+    log("\nDone! Generated 8 test images in " + timer.elapsedString());
+
     return 0;
 }

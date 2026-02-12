@@ -13,6 +13,7 @@
 #include "deep_writer.h"
 #include "utils.h"
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 #include <iostream>
@@ -232,6 +233,132 @@ DeepImage generateWall(float centerX, float centerY, float radius,
 }
 
 /**
+ * Generate full-frame layered volumetric fog with uniform XY density and color.
+ * Extinction changes only with traveled depth through the fog volume.
+ */
+DeepImage generateUniformLayeredFog(float depthFront, float depthBack,
+                                    int sliceCount,
+                                    float baseR, float baseG, float baseB,
+                                    float sliceAlphaNear, float sliceAlphaFar) {
+    DeepImage img(IMAGE_WIDTH, IMAGE_HEIGHT);
+    if (sliceCount < 1) {
+        return img;
+    }
+
+    for (int y = 0; y < IMAGE_HEIGHT; ++y) {
+        for (int x = 0; x < IMAGE_WIDTH; ++x) {
+            DeepPixel& pixel = img.pixel(x, y);
+            for (int i = 0; i < sliceCount; ++i) {
+                float t0 = static_cast<float>(i) / sliceCount;
+                float t1 = static_cast<float>(i + 1) / sliceCount;
+                float tc = 0.5f * (t0 + t1);
+
+                float z0 = depthFront + t0 * (depthBack - depthFront);
+                float z1 = depthFront + t1 * (depthBack - depthFront);
+
+                // Increase per-slice density with depth to amplify distance fade.
+                float sliceAlpha = sliceAlphaNear + (sliceAlphaFar - sliceAlphaNear) * tc;
+                sliceAlpha = std::clamp(sliceAlpha, 0.0f, 0.95f);
+
+                DeepSample sample;
+                sample.depth = z0;
+                sample.depth_back = z1;
+                sample.red = baseR * sliceAlpha;
+                sample.green = baseG * sliceAlpha;
+                sample.blue = baseB * sliceAlpha;
+                sample.alpha = sliceAlpha;
+                pixel.addSample(sample);
+            }
+        }
+    }
+
+    return img;
+}
+
+/**
+ * Generate a stylized 3-face rod (side + top + front cap) with depth ramped along length.
+ */
+DeepImage generateSlantedRectangle(float startX, float startY,
+                                   float endX, float endY,
+                                   float widthAtStart, float widthAtEnd,
+                                   float depthNearAtStart, float depthFarAtEnd,
+                                   float r, float g, float b, float alpha) {
+    DeepImage img(IMAGE_WIDTH, IMAGE_HEIGHT);
+
+    float dx = endX - startX;
+    float dy = endY - startY;
+    float length = std::sqrt(dx * dx + dy * dy);
+    if (length < 1e-6f) {
+        return img;
+    }
+
+    float dirX = dx / length;
+    float dirY = dy / length;
+    float perpX = -dirY;
+    float perpY = dirX;
+    float halfLength = 0.5f * length;
+    float midX = 0.5f * (startX + endX);
+    float midY = 0.5f * (startY + endY);
+    float capLength = 0.16f * widthAtStart;      // visible front face depth in screen space
+    float topThicknessScale = 0.28f;             // top face thickness as fraction of local width
+
+    auto shade = [](float v, float m) {
+        return std::clamp(v * m, 0.0f, 1.0f);
+    };
+
+    for (int y = 0; y < IMAGE_HEIGHT; ++y) {
+        for (int x = 0; x < IMAGE_WIDTH; ++x) {
+            float normX = (static_cast<float>(x) + 0.5f) / IMAGE_WIDTH;
+            float normY = (static_cast<float>(y) + 0.5f) / IMAGE_HEIGHT;
+
+            float relX = normX - midX;
+            float relY = normY - midY;
+
+            float along = relX * dirX + relY * dirY;
+            float across = relX * perpX + relY * perpY;
+            float t = std::clamp((along + halfLength) / length, 0.0f, 1.0f);
+            float localWidth = widthAtStart + t * (widthAtEnd - widthAtStart);
+            float localHalfWidth = 0.5f * localWidth;
+            float topThickness = topThicknessScale * localWidth;
+
+            bool inSideAlong = std::abs(along) <= halfLength;
+            bool inSideAcross = across >= -localHalfWidth && across <= localHalfWidth;
+            bool inTopAcross = across >= -(localHalfWidth + topThickness) && across < -localHalfWidth;
+            bool inFrontCap = along >= -(halfLength + capLength) && along < -halfLength &&
+                              across >= -(0.5f * widthAtStart + topThicknessScale * widthAtStart) &&
+                              across <=  (0.5f * widthAtStart);
+
+            if (inFrontCap) {
+                // Front face: nearest cap of the rod.
+                float frontDepth = depthNearAtStart - 0.8f;
+                DeepSample sample(frontDepth,
+                                  shade(r, 0.72f) * alpha,
+                                  shade(g, 0.72f) * alpha,
+                                  shade(b, 0.72f) * alpha,
+                                  alpha);
+                img.pixel(x, y).addSample(sample);
+            } else if (inSideAlong && inTopAcross) {
+                // Top face: slightly brighter and slightly nearer than side.
+                float depth = depthNearAtStart + t * (depthFarAtEnd - depthNearAtStart) - 0.45f;
+                DeepSample sample(depth,
+                                  shade(r, 1.18f) * alpha,
+                                  shade(g, 1.18f) * alpha,
+                                  shade(b, 1.18f) * alpha,
+                                  alpha);
+                img.pixel(x, y).addSample(sample);
+            } else if (inSideAlong && inSideAcross) {
+                // Side face: main visible area.
+                float depth = depthNearAtStart + t * (depthFarAtEnd - depthNearAtStart);
+                DeepSample sample(depth, r * alpha, g * alpha, b * alpha, alpha);
+                img.pixel(x, y).addSample(sample);
+            }
+        }
+    }
+
+    return img;
+}
+
+/**
  * Generate all demo-specific images for the showcase.
  */
 void generateDemo(const std::string& outputDir, bool outputFlat) {
@@ -303,6 +430,34 @@ void generateDemo(const std::string& outputDir, bool outputFlat) {
         writeDeepEXR(img, outputDir + "/backdrop.exr");
         log("  -> " + outputDir + "/backdrop.exr  (depth 30, near-black)");
         if (outputFlat) writeFlatEXR(img, outputDir + "/backdrop.flat.exr");
+    }
+
+    // ---- Scene 3: Fog Slice -- uniform fog + diagonal bar with depth ramp ----
+    {
+        log("\n[Fog Slice] Uniform layered fog field...");
+        DeepImage img = generateUniformLayeredFog(
+            4.0f, 30.0f,           // front/back depth
+            40,                    // many slices for strong depth extinction
+            0.10f, 0.14f, 0.22f,   // dark cool fog tint (uniform over image)
+            0.060f, 0.085f         // heavy per-slice alpha (near -> far)
+        );
+        writeDeepEXR(img, outputDir + "/fog_steep_gradient.exr");
+        log("  -> " + outputDir + "/fog_steep_gradient.exr  (uniform fog, depth 4-30, strong z extinction)");
+        if (outputFlat) writeFlatEXR(img, outputDir + "/fog_steep_gradient.flat.exr");
+    }
+    {
+        log("[Fog Slice] 3-face diagonal rod (side + top + front cap)...");
+        DeepImage img = generateSlantedRectangle(
+            0.03f, 0.80f,          // start (left, near)
+            1.10f, 0.16f,          // end (right, far) extends beyond frame
+            0.18f, 0.07f,          // tapered width: near wider -> far narrower
+            5.0f, 26.0f,           // near depth -> far depth
+            1.00f, 0.64f, 0.20f,   // warm color for contrast against cool fog
+            0.82f                  // readable near, but fades strongly with distance
+        );
+        writeDeepEXR(img, outputDir + "/diagonal_slice.exr");
+        log("  -> " + outputDir + "/diagonal_slice.exr  (depth 5->26 along diagonal)");
+        if (outputFlat) writeFlatEXR(img, outputDir + "/diagonal_slice.flat.exr");
     }
 }
 

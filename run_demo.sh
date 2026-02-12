@@ -61,7 +61,7 @@ mkdir -p "$INPUTS" "$SCENES"
 "$GEN" --demo --output "$INPUTS" 2>&1 | while IFS= read -r line; do
     echo -e "  ${DIM}${line}${RESET}"
 done
-ok "6 deep EXR files generated in $INPUTS/"
+ok "8 deep EXR files generated in $INPUTS/"
 
 # -- Render individual input previews ----------------------------------------
 section "3/5  Rendering individual input previews"
@@ -123,6 +123,21 @@ info ""
     "$SCENES/combined" > /dev/null 2>&1
 ok "-> ${BOLD}$SCENES/combined.png${RESET}"
 
+echo ""
+echo -e "  ${BOLD}${CYAN}Scene 4${RESET}${BOLD}: Fog Slice  --  Steep Fog Gradient + Diagonal Bar${RESET}"
+info "A full-frame uniform fog field (no top/bottom gradient), represented"
+info "as layered deep slices that accumulate extinction with traveled depth."
+info "A long slender rectangle cuts through the fog, with depth ramping"
+info "from near on the left to far on the right."
+info "Expected: near-left bright/readable, far-right significantly dimmer."
+info ""
+"$COMP" --deep-output \
+    "$INPUTS/fog_steep_gradient.exr" \
+    "$INPUTS/diagonal_slice.exr" \
+    "$INPUTS/backdrop.exr" \
+    "$SCENES/fog_slice" > /dev/null 2>&1
+ok "-> ${BOLD}$SCENES/fog_slice.png${RESET}"
+
 # -- Summary -----------------------------------------------------------------
 section "5/5  Done"
 
@@ -132,6 +147,7 @@ echo ""
 echo -e "    ${RED}Nebula${RESET}            $SCENES/nebula.png"
 echo -e "    ${MAGENTA}Crystal in Fog${RESET}    $SCENES/crystal.png"
 echo -e "    ${YELLOW}Combined${RESET}          $SCENES/combined.png"
+echo -e "    ${CYAN}Fog Slice${RESET}          $SCENES/fog_slice.png"
 echo ""
 echo -e "    ${DIM}Input previews    $INPUTS/*_preview.png${RESET}"
 echo -e "    ${DIM}Deep EXR data     $SCENES/*_merged.exr${RESET}"
@@ -153,5 +169,5 @@ echo ""
 # Open on macOS
 if [[ "$(uname)" == "Darwin" ]]; then
     echo -e "  ${DIM}Opening images...${RESET}"
-    open "$SCENES/nebula.png" "$SCENES/crystal.png" "$SCENES/combined.png" 2>/dev/null || true
+    open "$SCENES/nebula.png" "$SCENES/crystal.png" "$SCENES/combined.png" "$SCENES/fog_slice.png" 2>/dev/null || true
 fi

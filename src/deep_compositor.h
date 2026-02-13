@@ -40,14 +40,14 @@ struct CompositorStats {
  */
 DeepImage deepMerge(const std::vector<DeepImage>& inputs,
                     const CompositorOptions& options = CompositorOptions(),
-                    CompositorStats* stats = nullptr);
+                    CompositorStats* stats = nullptr, const std::vector<float>& zOffsets = {});
 
 /**
  * Deep merge (pointer version for large images)
  */
 DeepImage deepMerge(const std::vector<const DeepImage*>& inputs,
                     const CompositorOptions& options = CompositorOptions(),
-                    CompositorStats* stats = nullptr);
+                    CompositorStats* stats = nullptr, const std::vector<float>& zOffsets = {});
 
 /**
  * Merge samples from multiple deep pixels into one

@@ -48,7 +48,7 @@ DeepPixel mergePixels(const std::vector<const DeepPixel*>& pixels,
 
 DeepImage deepMerge(const std::vector<DeepImage>& inputs,
                     const CompositorOptions& options,
-                    CompositorStats* stats) {
+                    CompositorStats* stats, const std::vector<float>& zOffsets) {
     // Convert to pointer version
     std::vector<const DeepImage*> ptrs;
     ptrs.reserve(inputs.size());
@@ -56,12 +56,12 @@ DeepImage deepMerge(const std::vector<DeepImage>& inputs,
         ptrs.push_back(&img);
     }
     
-    return deepMerge(ptrs, options, stats);
+    return deepMerge(ptrs, options, stats, zOffsets);
 }
 
 DeepImage deepMerge(const std::vector<const DeepImage*>& inputs,
                     const CompositorOptions& options,
-                    CompositorStats* stats) {
+                    CompositorStats* stats, const std::vector<float>& zOffsets) {
     Timer timer;
     
     // Handle empty input
@@ -85,13 +85,30 @@ DeepImage deepMerge(const std::vector<const DeepImage*>& inputs,
     float minDepth = std::numeric_limits<float>::infinity();
     float maxDepth = -std::numeric_limits<float>::infinity();
     
-    for (const auto* img : inputs) {
-        totalInputSamples += img->totalSampleCount();
+    for (size_t i = 0; i < inputs.size(); ++i) {
+        const auto* img = inputs[i];
+
+        float offset = (i < zOffsets.size()) ? zOffsets[i] : 0.0f;
+        if (zOffsets.size() > 0) {
+            // Apply Z offset to each pixel in the image
+            if (zOffsets[i] != 0) {
+                for (int y = 0; y < img->height(); ++y) {
+                    for (int x = 0; x < img->width(); ++x) {
+                        DeepPixel& pixel = const_cast<DeepPixel&>(img->pixel(x, y));
+                        for (auto& sample : pixel.samples()) {
+                            sample.depth += offset;
+                            sample.depth_back += offset;
+                        }
+                    }
+                }
+            }
+        }
+        // totalInputSamples += img->totalSampleCount();
         
-        float imgMin, imgMax;
-        img->depthRange(imgMin, imgMax);
-        minDepth = std::min(minDepth, imgMin);
-        maxDepth = std::max(maxDepth, imgMax);
+        // float imgMin, imgMax;
+        // img->depthRange(imgMin, imgMax);
+        // minDepth = std::min(minDepth, imgMin);
+        // maxDepth = std::max(maxDepth, imgMax);
     }
     
     logVerbose("  Merging " + std::to_string(inputs.size()) + " images...");

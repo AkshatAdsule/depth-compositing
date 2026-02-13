@@ -14,6 +14,9 @@ cmake_policy(SET CMP0135 NEW)
 find_package(OpenEXR REQUIRED)
 find_package(Imath REQUIRED)
 find_package(PNG QUIET)
+find_package(PkgConfig REQUIRED)
+
+pkg_check_modules(GUI_DEPS REQUIRED gtkmm-4.0 libadwaita-1)
 
 # Option for PNG support
 if(PNG_FOUND)
@@ -23,7 +26,9 @@ else()
     message(STATUS "PNG support disabled (libpng not found)")
 endif()
 
-include_directories(${CMAKE_SOURCE_DIR}/src)
+# include_directories(${CMAKE_SOURCE_DIR}/src)
+include_directories(${CMAKE_SOURCE_DIR}/src ${GUI_DEPS_INCLUDE_DIRS})
+link_directories(${GUI_DEPS_LIBRARY_DIRS})
 
 # Main compositor sources
 set(COMPOSITOR_SOURCES
@@ -48,6 +53,16 @@ if(PNG_FOUND)
     target_link_libraries(deep_compositor PNG::PNG)
 endif()
 
+
+# GUI executable
+add_executable(deep_gui src/gui_main.cpp)
+target_compile_options(deep_gui PRIVATE ${GUI_DEPS_CFLAGS_OTHER})
+target_link_libraries(deep_gui 
+    PRIVATE 
+    ${GUI_DEPS_LIBRARIES}
+)
+
+
 # Test image generator executable
 add_executable(generate_test_images
     test_data/generate_test_images.cpp
@@ -70,8 +85,10 @@ file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/output)
 
 # Compiler warnings
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
-    target_compile_options(deep_compositor PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(generate_test_images PRIVATE -Wall -Wextra -Wpedantic)
+    set(COMMON_FLAGS -Wall -Wextra -Wpedantic)
+    target_compile_options(deep_compositor PRIVATE ${COMMON_FLAGS})
+    target_compile_options(deep_gui PRIVATE ${COMMON_FLAGS})
+    target_compile_options(generate_test_images PRIVATE ${COMMON_FLAGS})
 endif()
 
 # Install targets

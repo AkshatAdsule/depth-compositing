@@ -15,6 +15,7 @@ const char* VERSION = "1.0";
 
 struct Options {
     std::vector<std::string> inputFiles;
+    std::vector<float> inputZOffsets; // Merge the two later
     std::string outputPrefix;
     bool deepOutput = false;
     bool flatOutput = true;
@@ -22,7 +23,20 @@ struct Options {
     bool verbose = false;
     float mergeThreshold = 0.001f;
     bool showHelp = false;
+    bool modOffset = false;
 };
+
+bool isFloat(const std::string& s) {
+    std::istringstream iss(s);
+    float f;
+    // Try to read a float, check if successful and no non-whitespace characters remain
+    if (!(iss >> f)) {
+        return false; // Conversion failed
+    }
+    // Check if there are any non-whitespace characters left in the stream
+    // Use std::ws to consume any trailing whitespace
+    return (iss >> std::ws).eof();
+}
 
 void printUsage(const char* programName) {
     std::cout << "Deep Image Compositor v" << VERSION << "\n\n"
@@ -71,6 +85,8 @@ bool parseArgs(int argc, char* argv[], Options& opts) {
             opts.pngOutput = true;
         } else if (arg == "--no-png-output") {
             opts.pngOutput = false;
+        } else if (arg == "--mod-offset") {
+            opts.modOffset = true;
         } else if (arg == "--merge-threshold") {
             if (i + 1 >= argc) {
                 std::cerr << "Error: --merge-threshold requires a value\n";
@@ -82,15 +98,47 @@ bool parseArgs(int argc, char* argv[], Options& opts) {
                 std::cerr << "Error: Invalid merge threshold value\n";
                 return false;
             }
-        } else if (arg[0] == '-') {
+        } else if (arg[0] == '-' and !isFloat(arg)) {
             std::cerr << "Error: Unknown option: " << arg << "\n";
             return false;
         } else {
             // Positional argument (input file or output prefix)
-            opts.inputFiles.push_back(arg);
+
+            if (opts.modOffset && isFloat(arg)) {
+                if (opts.inputFiles.size() != opts.inputZOffsets.size() + 1) {
+                    std::cerr << "Error: Mismatched position of Z offset value\n";
+                    return false;
+                }
+                try {
+                    float offset = std::stof(arg);
+                    opts.inputZOffsets.push_back(offset);
+                    continue; // Don't treat this as an input file
+                } catch (...) {
+                    std::cerr << "Error: Invalid Z offset value: " << arg << "\n";
+                    return false;
+                }
+            } else{
+                
+                if (opts.modOffset && (opts.inputFiles.size() == opts.inputZOffsets.size() + 1)) {
+                    opts.inputZOffsets.push_back(0); // Default offset for this file
+                }
+                opts.inputFiles.push_back(arg); // Could be input file or output prefix, we'll determine later
+            }
+           
+            
         }
+       
+
     }
+    if (opts.modOffset && (opts.inputFiles.size() != opts.inputZOffsets.size() )) {
+        opts.inputZOffsets.push_back(0); // Default offset for last file if not provided
+    }
+    std::cerr << "There are " << opts.inputFiles.size() << " input files and " << opts.inputZOffsets.size() << " Z offsets\n";
     
+    for (size_t i = 0; i < opts.inputZOffsets.size(); ++i) {
+        std::cerr << "Z Offset " << i << ": " << opts.inputZOffsets[i] << "\n";
+    }
+
     // Need at least one input and one output prefix
     if (opts.inputFiles.size() < 2) {
         std::cerr << "Error: Need at least one input file and an output prefix\n";
@@ -194,7 +242,7 @@ int main(int argc, char* argv[]) {
     
     CompositorStats stats;
     
-    DeepImage merged = deepMerge(images, compOpts, &stats);
+    DeepImage merged = deepMerge(images, compOpts, &stats, opts.inputZOffsets);
     
     log("  Combined: " + formatNumber(stats.totalOutputSamples) + " total samples");
     log("  Depth range: " + std::to_string(stats.minDepth) + " to " + 

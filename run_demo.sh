@@ -25,8 +25,8 @@ banner() {
     echo -e "${BOLD}${CYAN}+-----------------------------------------------------------+${RESET}"
     echo -e "${BOLD}${CYAN}|   Deep Volumetric Image Compositing  -  Algorithm Demo    |${RESET}"
     echo -e "${BOLD}${CYAN}|                                                           |${RESET}"
-    echo -e "${BOLD}${CYAN}|${RESET}   Beer-Lambert Splitting  /  Uniform Interspersion      ${BOLD}${CYAN}|${RESET}"
-    echo -e "${BOLD}${CYAN}|${RESET}   Front-to-Back Over Compositing                        ${BOLD}${CYAN}|${RESET}"
+    echo -e "${BOLD}${CYAN}|${RESET}   Beer-Lambert Splitting  /  Uniform Interspersion        ${BOLD}${CYAN}|${RESET}"
+    echo -e "${BOLD}${CYAN}|${RESET}   Front-to-Back Over Compositing                          ${BOLD}${CYAN}|${RESET}"
     echo -e "${BOLD}${CYAN}+-----------------------------------------------------------+${RESET}"
     echo ""
 }
@@ -61,7 +61,7 @@ mkdir -p "$INPUTS" "$SCENES"
 "$GEN" --demo --output "$INPUTS" 2>&1 | while IFS= read -r line; do
     echo -e "  ${DIM}${line}${RESET}"
 done
-ok "8 deep EXR files generated in $INPUTS/"
+ok "16 deep EXR files generated in $INPUTS/"
 
 # -- Render individual input previews ----------------------------------------
 section "3/5  Rendering individual input previews"
@@ -138,6 +138,52 @@ info ""
     "$SCENES/fog_slice" > /dev/null 2>&1
 ok "-> ${BOLD}$SCENES/fog_slice.png${RESET}"
 
+echo ""
+echo -e "  ${BOLD}${GREEN}Scene 5${RESET}${BOLD}: Stained Glass  --  Intersecting Transparent Panes${RESET}"
+info "Three semi-transparent colored panes (red/green/blue), each tilted"
+info "in depth so they cross through each other.  No single global layer"
+info "ordering works -- deep compositing resolves the per-pixel depth order."
+info ""
+info "  Red pane    [depth 5->25 left-to-right]   alpha 0.45"
+info "  Green pane  [depth 25->5 left-to-right]   alpha 0.45"
+info "  Blue pane   [depth 5->25 top-to-bottom]   alpha 0.45"
+info ""
+"$COMP" --deep-output \
+    "$INPUTS/stained_red.exr" \
+    "$INPUTS/stained_green.exr" \
+    "$INPUTS/stained_blue.exr" \
+    "$INPUTS/backdrop.exr" \
+    "$SCENES/stained_glass" > /dev/null 2>&1
+ok "-> ${BOLD}$SCENES/stained_glass.png${RESET}"
+
+echo ""
+echo -e "  ${BOLD}${YELLOW}Scene 6${RESET}${BOLD}: Lighthouse  --  Light Beam Through Fog${RESET}"
+info "A bright volumetric cone beam cuts diagonally through a large"
+info "volumetric fog bank.  The two volumes overlap at varying depths."
+info "Deep compositing splits and interleaves them correctly."
+info ""
+"$COMP" --deep-output \
+    "$INPUTS/lighthouse_fog.exr" \
+    "$INPUTS/lighthouse_beam.exr" \
+    "$INPUTS/backdrop.exr" \
+    "$SCENES/lighthouse" > /dev/null 2>&1
+ok "-> ${BOLD}$SCENES/lighthouse.png${RESET}"
+
+echo ""
+echo -e "  ${BOLD}${MAGENTA}Scene 7${RESET}${BOLD}: Rings  --  Interlocking Chain Links${RESET}"
+info "Three opaque torus rings interlinked like a chain.  Each ring's"
+info "depth varies sinusoidally around its circumference so that where"
+info "two rings overlap, one passes in front then behind the other."
+info "Impossible to composite correctly without per-pixel depth."
+info ""
+"$COMP" --deep-output \
+    "$INPUTS/ring_gold.exr" \
+    "$INPUTS/ring_silver.exr" \
+    "$INPUTS/ring_copper.exr" \
+    "$INPUTS/backdrop.exr" \
+    "$SCENES/rings" > /dev/null 2>&1
+ok "-> ${BOLD}$SCENES/rings.png${RESET}"
+
 # -- Summary -----------------------------------------------------------------
 section "5/5  Done"
 
@@ -147,7 +193,10 @@ echo ""
 echo -e "    ${RED}Nebula${RESET}            $SCENES/nebula.png"
 echo -e "    ${MAGENTA}Crystal in Fog${RESET}    $SCENES/crystal.png"
 echo -e "    ${YELLOW}Combined${RESET}          $SCENES/combined.png"
-echo -e "    ${CYAN}Fog Slice${RESET}          $SCENES/fog_slice.png"
+echo -e "    ${CYAN}Fog Slice${RESET}         $SCENES/fog_slice.png"
+echo -e "    ${GREEN}Stained Glass${RESET}     $SCENES/stained_glass.png"
+echo -e "    ${YELLOW}Lighthouse${RESET}        $SCENES/lighthouse.png"
+echo -e "    ${MAGENTA}Rings${RESET}             $SCENES/rings.png"
 echo ""
 echo -e "    ${DIM}Input previews    $INPUTS/*_preview.png${RESET}"
 echo -e "    ${DIM}Deep EXR data     $SCENES/*_merged.exr${RESET}"
@@ -165,9 +214,15 @@ echo ""
 echo -e "    ${CYAN}Combined${RESET} - Six overlapping layers resolved in ${BOLD}one pass${RESET}."
 echo -e "             Every pairwise volume overlap handled correctly."
 echo ""
-
-# Open on macOS
-if [[ "$(uname)" == "Darwin" ]]; then
-    echo -e "  ${DIM}Opening images...${RESET}"
-    open "$SCENES/nebula.png" "$SCENES/crystal.png" "$SCENES/combined.png" "$SCENES/fog_slice.png" 2>/dev/null || true
-fi
+echo -e "    ${CYAN}Stained Glass${RESET} - Depth ordering ${BOLD}changes across the image${RESET}."
+echo -e "             Red is in front on the left, green on the right."
+echo -e "             Where all three cross, complex color mixing occurs."
+echo ""
+echo -e "    ${CYAN}Lighthouse${RESET} - Volumetric beam ${BOLD}interpenetrates${RESET} volumetric fog."
+echo -e "             The compositor splits both volumes at their overlap"
+echo -e "             boundaries for physically correct blending."
+echo ""
+echo -e "    ${CYAN}Rings${RESET}    - Each ring passes ${BOLD}in front then behind${RESET} its neighbor."
+echo -e "             No single layer order works.  Deep compositing resolves"
+echo -e "             the per-pixel depth correctly."
+echo ""

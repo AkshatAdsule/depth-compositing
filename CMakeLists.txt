@@ -36,9 +36,8 @@ endif()
 
 include_directories(${CMAKE_SOURCE_DIR}/src)
 
-# Main compositor sources
-set(COMPOSITOR_SOURCES
-    src/main.cpp
+# Core library (shared between main executable, test generator, and tests)
+add_library(compositor_lib STATIC
     src/utils.cpp
     src/deep_image.cpp
     src/deep_reader.cpp
@@ -47,42 +46,27 @@ set(COMPOSITOR_SOURCES
     src/deep_volume.cpp
 )
 
-set(TEST_SOURCES 
-    src/tests/hello_test.cc
+target_link_libraries(compositor_lib
+    OpenEXR::OpenEXR
+    Imath::Imath
 )
+
+if(PNG_FOUND)
+    target_link_libraries(compositor_lib PNG::PNG)
+endif()
+
+target_compile_options(compositor_lib PRIVATE -Wall -Wextra -Wpedantic)
 
 # Main executable
-add_executable(deep_compositor ${COMPOSITOR_SOURCES})
-
-target_link_libraries(deep_compositor
-    OpenEXR::OpenEXR
-    Imath::Imath
-)
-
-if(PNG_FOUND)
-    target_link_libraries(deep_compositor PNG::PNG)
-endif()
+add_executable(deep_compositor src/main.cpp)
+target_link_libraries(deep_compositor compositor_lib)
 
 # Test image generator executable
-add_executable(generate_test_images
-    test_data/generate_test_images.cpp
-    src/utils.cpp
-    src/deep_image.cpp
-    src/deep_writer.cpp
-)
-
-target_link_libraries(generate_test_images
-    OpenEXR::OpenEXR
-    Imath::Imath
-)
-
-if(PNG_FOUND)
-    target_link_libraries(generate_test_images PNG::PNG)
-endif()
+add_executable(generate_test_images test_data/generate_test_images.cpp)
+target_link_libraries(generate_test_images compositor_lib)
 
 # Create output directory
 file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/output)
-
 
 target_compile_options(deep_compositor PRIVATE -Wall -Wextra -Wpedantic)
 target_compile_options(generate_test_images PRIVATE -Wall -Wextra -Wpedantic)
@@ -94,8 +78,22 @@ install(TARGETS deep_compositor generate_test_images
 
 
 enable_testing()
-add_executable(compositor_test ${TEST_SOURCES})
-target_link_libraries(compositor_test GTest::gtest_main)
-
 include(GoogleTest)
-gtest_discover_tests(compositor_test)
+
+# Unit tests
+file(GLOB_RECURSE UNIT_TEST_SOURCES src/tests/unit/*.cpp)
+if(UNIT_TEST_SOURCES)
+    add_executable(unit_tests ${UNIT_TEST_SOURCES})
+    target_link_libraries(unit_tests compositor_lib GTest::gtest_main)
+    target_compile_options(unit_tests PRIVATE -Wall -Wextra -Wpedantic)
+    gtest_discover_tests(unit_tests)
+endif()
+
+# Integration tests
+file(GLOB_RECURSE INTEGRATION_TEST_SOURCES src/tests/integration/*.cpp)
+if(INTEGRATION_TEST_SOURCES)
+    add_executable(integration_tests ${INTEGRATION_TEST_SOURCES})
+    target_link_libraries(integration_tests compositor_lib GTest::gtest_main)
+    target_compile_options(integration_tests PRIVATE -Wall -Wextra -Wpedantic)
+    gtest_discover_tests(integration_tests)
+endif()

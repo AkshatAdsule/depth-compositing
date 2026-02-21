@@ -1,4 +1,6 @@
 cmake_minimum_required(VERSION 3.15)
+include(FetchContent)
+
 
 project(deep_compositor_demo VERSION 1.0)
 
@@ -9,6 +11,15 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Fixes CMake FetchContent warning
 cmake_policy(SET CMP0135 NEW)
+
+# GoogleTest
+FetchContent_Declare(
+  googletest
+  URL https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip
+)
+
+FetchContent_MakeAvailable(googletest)
+
 
 # Find required packages
 find_package(OpenEXR REQUIRED)
@@ -34,6 +45,10 @@ set(COMPOSITOR_SOURCES
     src/deep_writer.cpp
     src/deep_compositor.cpp
     src/deep_volume.cpp
+)
+
+set(TEST_SOURCES 
+    src/tests/hello_test.cc
 )
 
 # Main executable
@@ -68,13 +83,19 @@ endif()
 # Create output directory
 file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/output)
 
-# Compiler warnings
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
-    target_compile_options(deep_compositor PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(generate_test_images PRIVATE -Wall -Wextra -Wpedantic)
-endif()
+
+target_compile_options(deep_compositor PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(generate_test_images PRIVATE -Wall -Wextra -Wpedantic)
 
 # Install targets
 install(TARGETS deep_compositor generate_test_images
     RUNTIME DESTINATION bin
 )
+
+
+enable_testing()
+add_executable(compositor_test ${TEST_SOURCES})
+target_link_libraries(compositor_test GTest::gtest_main)
+
+include(GoogleTest)
+gtest_discover_tests(compositor_test)

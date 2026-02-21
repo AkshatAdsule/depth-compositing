@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include "deep_image.h"
@@ -8,6 +9,7 @@
 #include "../test_helpers.h"
 
 using namespace deep_compositor;
+namespace fs = std::filesystem;
 
 // ============================================================================
 // IORoundtripTest fixture
@@ -16,11 +18,24 @@ using namespace deep_compositor;
 class IORoundtripTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        // Build a temp path unique to this test run
-        tempDir_ = testing::TempDir();
+        // Use std::filesystem to get a reliable, writable temp directory.
+        // Create a per-test subdirectory so parallel or repeated runs don't collide.
+        auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
+        std::string dirName = std::string(info->name());
+        for (auto& c : dirName) {
+            if (!std::isalnum(static_cast<unsigned char>(c))) c = '_';
+        }
+        testDir_ = fs::temp_directory_path() / "dc_tests" / dirName;
+        fs::create_directories(testDir_);
+        tempDir_ = testDir_.string();
         if (tempDir_.back() != '/' && tempDir_.back() != '\\') {
             tempDir_ += '/';
         }
+    }
+
+    void TearDown() override {
+        std::error_code ec;
+        fs::remove_all(testDir_, ec);  // best-effort cleanup; ignore errors
     }
 
     std::string tempPath(const std::string& name) {
@@ -33,6 +48,7 @@ protected:
         return loadDeepEXR(filename);
     }
 
+    fs::path testDir_;
     std::string tempDir_;
 };
 

@@ -28,26 +28,78 @@ bool isDeepEXR(const std::string& filename) {
     }
 }
 
-bool getDeepEXRInfo(const std::string& filename, 
-                    int& width, int& height, bool& isDeep) {
+// bool getDeepEXRInfo(const std::string& filename, 
+//                     int& width, int& height, bool& isDeep) {
+//     try {
+//         Imf::MultiPartInputFile file(filename.c_str());
+//         if (file.parts() < 1) {
+//             return false;
+//         }
+        
+//         const Imf::Header& header = file.header(0);
+//         isDeep = header.hasType() && Imf::isDeepData(header.type());
+        
+//         Imath::Box2i dataWindow = header.dataWindow();
+//         width = dataWindow.max.x - dataWindow.min.x + 1;
+//         height = dataWindow.max.y - dataWindow.min.y + 1;
+        
+//         return true;
+//     } catch (...) {
+//         return false;
+//     }
+// }
+
+
+
+// Loads in the deep EXR file and returns a DeepInfo object
+// Throws DeepReaderException on failure, including if file is not a deep EXR or missing required channels
+DeepInfo getDeepEXRInfo(const std::string& filename) {
+    // Check if file exists
+    if (!fileExists(filename)) {
+        throw DeepReaderException("File not found: " + filename);
+    }
+
     try {
         Imf::MultiPartInputFile file(filename.c_str());
         if (file.parts() < 1) {
-            return false;
+            throw DeepReaderException("File has no parts: " + filename);
         }
         
         const Imf::Header& header = file.header(0);
-        isDeep = header.hasType() && Imf::isDeepData(header.type());
+        
+        // Verify it's a deep image
+        if (!header.hasType() || !Imf::isDeepData(header.type())) {
+            throw DeepReaderException("File is not a deep EXR: " + filename);
+        }
         
         Imath::Box2i dataWindow = header.dataWindow();
-        width = dataWindow.max.x - dataWindow.min.x + 1;
-        height = dataWindow.max.y - dataWindow.min.y + 1;
+        int width = dataWindow.max.x - dataWindow.min.x + 1;
+        int height = dataWindow.max.y - dataWindow.min.y + 1;
         
-        return true;
-    } catch (...) {
-        return false;
+        // Check for required channels
+        const Imf::ChannelList& channels = header.channels();
+        bool hasR = channels.findChannel("R") != nullptr;
+        bool hasG = channels.findChannel("G") != nullptr;
+        bool hasB = channels.findChannel("B") != nullptr;
+        bool hasA = channels.findChannel("A") != nullptr;
+        bool hasZ = channels.findChannel("Z") != nullptr;
+
+        if (!hasR || !hasG || !hasB || !hasA || !hasZ) {
+            std::string missing;
+            if (!hasR) missing += "R ";
+            if (!hasG) missing += "G ";
+            if (!hasB) missing += "B ";
+            if (!hasA) missing += "A ";
+            if (!hasZ) missing += "Z ";
+            throw DeepReaderException("Missing required channels: " + missing);
+        }
+
+        return DeepInfo(filename);
+    } catch (const std::exception& e) {
+        throw DeepReaderException("Failed to read EXR info: " + std::string(e.what()));
     }
 }
+
 
 DeepImage loadDeepEXR(const std::string& filename) {
     logVerbose("  Opening: " + filename);

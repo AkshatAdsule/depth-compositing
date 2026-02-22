@@ -1,17 +1,21 @@
 #pragma once
-
+#include <OpenEXR/ImfDeepFrameBuffer.h>
+#include <OpenEXR/ImfDeepScanLineInputFile.h> // For reading deep EXR files
 #include <vector>
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <limits>
+#include <ImfDeepScanLineInputFile.h> // OpenEXR
 
 namespace deep_compositor {
 
 /**
  * A single deep sample containing depth and premultiplied RGBA values
  */
-struct DeepSample {
+
+
+ struct DeepSample {
     float depth;       // Z front (depth from camera)
     float depth_back;  // Z back. Equal to depth for point/hard-surface samples.
     float red;         // Premultiplied red
@@ -131,6 +135,8 @@ private:
 /**
  * A 2D deep image containing a grid of deep pixels
  */
+
+
 class DeepImage {
 public:
     DeepImage();
@@ -213,6 +219,69 @@ private:
      * Check if coordinates are valid
      */
     bool isValidCoord(int x, int y) const;
+};
+
+
+
+class DeepInfo {
+public:   
+    DeepInfo();
+    DeepInfo(const std::string& filename) 
+        : file_(filename.c_str()) // This opens the file immediately
+    {
+        // Once the file is open, we extract the metadata (width/height)
+        Imath::Box2i dw = file_.header().dataWindow();
+        width_  = dw.max.x - dw.min.x + 1;
+        height_ = dw.max.y - dw.min.y + 1;
+        
+        // We can verify if it's deep, though DeepScanLineInputFile 
+        // will throw an error if you point it at a non-deep file anyway.
+    }
+
+    int width() const { return width_; }
+    int height() const { return height_; }
+    bool isDeep() const { return isDeep_; }
+
+    Imf::DeepScanLineInputFile& getFile()  { return file_; }
+
+    // Temporary buffer for sample counts of a single row
+    const unsigned int* getSampleCountsForRow(int y) {
+        loadRowCounts(y);
+        return &tempSampleCounts[0];  // return pointer to the start of the row's sample counts
+    }
+
+    void loadRowCounts(int y) {
+        // Resize buffer to fit one row of integers
+        tempSampleCounts.resize(width_);
+        size_t totalOffset = static_cast<size_t>(y) * width_ * sizeof(unsigned int);
+
+        Imf::DeepFrameBuffer countBuffer;
+        countBuffer.insert("sampleCount", Imf::DeepSlice(
+            Imf::UINT, 
+            (char*)(&tempSampleCounts[0] - totalOffset), // The pointer trick
+            sizeof(unsigned int),                       // x-stride
+            sizeof(unsigned int) * width_               // y-stride
+        ));
+
+        file_.setFrameBuffer(countBuffer);
+        file_.readPixelSampleCounts(y, y); // Error here 
+    }
+
+private:
+    int width_;
+    int height_;
+
+    std::vector<unsigned int> tempSampleCounts;
+    
+    Imf::DeepScanLineInputFile file_;
+
+    bool isDeep_;
+    bool isValidCoord(int x, int y) const {
+        return (x >= 0 && x < width_ && y >= 0 && y < height_);
+    }
+
+    // Helper to convert (x, y) to linear index for any internal arrays
+    size_t index(int x, int y) const { return static_cast<size_t>(y) * width_ + x; }
 };
 
 } // namespace deep_compositor

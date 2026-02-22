@@ -40,7 +40,6 @@ bool isDeepEXR(const std::string& filename);
  * @param isDeep Output: true if deep image
  * @return true if file info was read successfully
  */
-bool getDeepEXRInfo(const std::string& filename, 
-                    int& width, int& height, bool& isDeep);
+DeepInfo getDeepEXRInfo(const std::string& filename);
 
 } // namespace deep_compositor

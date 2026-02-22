@@ -1,7 +1,10 @@
 #pragma once
 
 #include "deep_image.h"
+// #include "deep_options.h"
+
 #include <vector>
+#include "deep_options.h"
 
 namespace deep_compositor {
 
@@ -38,6 +41,9 @@ struct CompositorStats {
  * @return Merged deep image
  * @throws std::runtime_error if inputs have mismatched dimensions
  */
+
+std::vector<float> processAllEXR(const Options& opts);
+
 DeepImage deepMerge(const std::vector<DeepImage>& inputs,
                     const CompositorOptions& options = CompositorOptions(),
                     CompositorStats* stats = nullptr, const std::vector<float>& zOffsets = {});

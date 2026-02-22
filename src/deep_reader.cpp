@@ -106,9 +106,19 @@ DeepImage loadDeepEXR(const std::string& filename) {
     // Allocate sample count array
     std::vector<unsigned int> sampleCounts(static_cast<size_t>(width) * height);
     
-    // Set up the frame buffer for sample counts
+    // Prepare pointer arrays before setFrameBuffer(). OpenEXR stores a copy of
+    // the frame buffer descriptor, so these arrays must remain stable in memory.
+    std::vector<float*> rPtrs(sampleCounts.size(), nullptr);
+    std::vector<float*> gPtrs(sampleCounts.size(), nullptr);
+    std::vector<float*> bPtrs(sampleCounts.size(), nullptr);
+    std::vector<float*> aPtrs(sampleCounts.size(), nullptr);
+    std::vector<float*> zPtrs(sampleCounts.size(), nullptr);
+    std::vector<float*> zBackPtrs(sampleCounts.size(), nullptr);
+
+    // Use one persistent frame buffer lifecycle: set once, then read sample
+    // counts and deep samples. This avoids version-specific state resets.
     Imf::DeepFrameBuffer frameBuffer;
-    
+
     frameBuffer.insertSampleCountSlice(
         Imf::Slice(
             Imf::UINT,
@@ -117,6 +127,74 @@ DeepImage loadDeepEXR(const std::string& filename) {
             sizeof(unsigned int) * width  // yStride
         )
     );
+
+    frameBuffer.insert(
+        "R",
+        Imf::DeepSlice(
+            Imf::FLOAT,
+            reinterpret_cast<char*>(rPtrs.data() - minX - static_cast<long>(minY) * width),
+            sizeof(float*),           // xStride for pointer array
+            sizeof(float*) * width,   // yStride for pointer array
+            sizeof(float)             // sample stride
+        )
+    );
+
+    frameBuffer.insert(
+        "G",
+        Imf::DeepSlice(
+            Imf::FLOAT,
+            reinterpret_cast<char*>(gPtrs.data() - minX - static_cast<long>(minY) * width),
+            sizeof(float*),
+            sizeof(float*) * width,
+            sizeof(float)
+        )
+    );
+
+    frameBuffer.insert(
+        "B",
+        Imf::DeepSlice(
+            Imf::FLOAT,
+            reinterpret_cast<char*>(bPtrs.data() - minX - static_cast<long>(minY) * width),
+            sizeof(float*),
+            sizeof(float*) * width,
+            sizeof(float)
+        )
+    );
+
+    frameBuffer.insert(
+        "A",
+        Imf::DeepSlice(
+            Imf::FLOAT,
+            reinterpret_cast<char*>(aPtrs.data() - minX - static_cast<long>(minY) * width),
+            sizeof(float*),
+            sizeof(float*) * width,
+            sizeof(float)
+        )
+    );
+
+    frameBuffer.insert(
+        "Z",
+        Imf::DeepSlice(
+            Imf::FLOAT,
+            reinterpret_cast<char*>(zPtrs.data() - minX - static_cast<long>(minY) * width),
+            sizeof(float*),
+            sizeof(float*) * width,
+            sizeof(float)
+        )
+    );
+
+    if (hasZBack) {
+        frameBuffer.insert(
+            "ZBack",
+            Imf::DeepSlice(
+                Imf::FLOAT,
+                reinterpret_cast<char*>(zBackPtrs.data() - minX - static_cast<long>(minY) * width),
+                sizeof(float*),
+                sizeof(float*) * width,
+                sizeof(float)
+            )
+        );
+    }
     
     file->setFrameBuffer(frameBuffer);
     
@@ -131,14 +209,6 @@ DeepImage loadDeepEXR(const std::string& filename) {
     
     logVerbose("    Total samples: " + formatNumber(totalSamples));
     
-    // Allocate arrays for sample data
-    std::vector<float*> rPtrs(sampleCounts.size());
-    std::vector<float*> gPtrs(sampleCounts.size());
-    std::vector<float*> bPtrs(sampleCounts.size());
-    std::vector<float*> aPtrs(sampleCounts.size());
-    std::vector<float*> zPtrs(sampleCounts.size());
-    std::vector<float*> zBackPtrs(sampleCounts.size());
-
     // Allocate contiguous storage for all samples
     std::vector<float> rData(totalSamples);
     std::vector<float> gData(totalSamples);
@@ -167,88 +237,6 @@ DeepImage loadDeepEXR(const std::string& filename) {
             if (hasZBack) zBackPtrs[i] = nullptr;
         }
     }
-    
-    // Set up frame buffer for deep data
-    Imf::DeepFrameBuffer deepFrameBuffer;
-    
-    deepFrameBuffer.insertSampleCountSlice(
-        Imf::Slice(
-            Imf::UINT,
-            reinterpret_cast<char*>(sampleCounts.data() - minX - static_cast<long>(minY) * width),
-            sizeof(unsigned int),
-            sizeof(unsigned int) * width
-        )
-    );
-    
-    deepFrameBuffer.insert(
-        "R",
-        Imf::DeepSlice(
-            Imf::FLOAT,
-            reinterpret_cast<char*>(rPtrs.data() - minX - static_cast<long>(minY) * width),
-            sizeof(float*),           // xStride for pointer array
-            sizeof(float*) * width,   // yStride for pointer array
-            sizeof(float)             // sample stride
-        )
-    );
-    
-    deepFrameBuffer.insert(
-        "G",
-        Imf::DeepSlice(
-            Imf::FLOAT,
-            reinterpret_cast<char*>(gPtrs.data() - minX - static_cast<long>(minY) * width),
-            sizeof(float*),
-            sizeof(float*) * width,
-            sizeof(float)
-        )
-    );
-    
-    deepFrameBuffer.insert(
-        "B",
-        Imf::DeepSlice(
-            Imf::FLOAT,
-            reinterpret_cast<char*>(bPtrs.data() - minX - static_cast<long>(minY) * width),
-            sizeof(float*),
-            sizeof(float*) * width,
-            sizeof(float)
-        )
-    );
-    
-    deepFrameBuffer.insert(
-        "A",
-        Imf::DeepSlice(
-            Imf::FLOAT,
-            reinterpret_cast<char*>(aPtrs.data() - minX - static_cast<long>(minY) * width),
-            sizeof(float*),
-            sizeof(float*) * width,
-            sizeof(float)
-        )
-    );
-    
-    deepFrameBuffer.insert(
-        "Z",
-        Imf::DeepSlice(
-            Imf::FLOAT,
-            reinterpret_cast<char*>(zPtrs.data() - minX - static_cast<long>(minY) * width),
-            sizeof(float*),
-            sizeof(float*) * width,
-            sizeof(float)
-        )
-    );
-
-    if (hasZBack) {
-        deepFrameBuffer.insert(
-            "ZBack",
-            Imf::DeepSlice(
-                Imf::FLOAT,
-                reinterpret_cast<char*>(zBackPtrs.data() - minX - static_cast<long>(minY) * width),
-                sizeof(float*),
-                sizeof(float*) * width,
-                sizeof(float)
-            )
-        );
-    }
-
-    file->setFrameBuffer(deepFrameBuffer);
     
     // Read the deep pixel data
     file->readPixels(minY, minY + height - 1);

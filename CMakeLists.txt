@@ -95,3 +95,31 @@ endif()
 install(TARGETS deep_compositor generate_test_images
     RUNTIME DESTINATION bin
 )
+
+
+# Create a dedicated test driver executable
+add_executable(tester src/tester.cpp)
+
+# 2. Add the source files required by the tester logic
+target_sources(tester PRIVATE 
+    src/utils.cpp
+    src/deep_image.cpp
+    src/deep_writer.cpp
+)
+
+# 3. Link the necessary OpenEXR and Imath libraries
+target_link_libraries(tester
+    PRIVATE
+    OpenEXR::OpenEXR
+    Imath::Imath
+)
+
+# 4. (Optional) Add PNG support if detected
+if(PNG_FOUND)
+    target_link_libraries(tester PRIVATE PNG::PNG)
+endif()
+
+# 5. Set the output location to your project root or build folder
+set_target_properties(tester PROPERTIES 
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)

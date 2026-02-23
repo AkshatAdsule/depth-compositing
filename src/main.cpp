@@ -180,26 +180,28 @@ int main(int argc, char* argv[]) {
     }
 
 
-    processAllEXR(opts);
+     std::vector<float> finalImage = processAllEXR(opts);
 
-    return 0; // We will return the flattened RGBA data as a vector of floats at the end of this function, but for now we just want to test loading and merging
+
+     
+    // return 0; // We will return the flattened RGBA data as a vector of floats at the end of this function, but for now we just want to test loading and merging
    
     // logVerbose("  Load time: " + loadTimer.elapsedString());
     
-    log("\nMerging...");
+    // log("\nMerging...");
     
-    CompositorOptions compOpts;
-    compOpts.mergeThreshold = opts.mergeThreshold;
-    compOpts.enableMerging = (opts.mergeThreshold > 0.0f);
+    // CompositorOptions compOpts;
+    // compOpts.mergeThreshold = opts.mergeThreshold;
+    // compOpts.enableMerging = (opts.mergeThreshold > 0.0f);
     
-    CompositorStats stats;
+    // CompositorStats stats;
     
-    // DeepImage merged = deepMerge(images, compOpts, &stats, opts.inputZOffsets);
+    // // DeepImage merged = deepMerge(images, compOpts, &stats, opts.inputZOffsets);
     
-    log("  Combined: " + formatNumber(stats.totalOutputSamples) + " total samples");
-    log("  Depth range: " + std::to_string(stats.minDepth) + " to " + 
-        std::to_string(stats.maxDepth));
-    log("  Merge time: " + std::to_string(static_cast<int>(stats.mergeTimeMs)) + " ms");
+    // log("  Combined: " + formatNumber(stats.totalOutputSamples) + " total samples");
+    // log("  Depth range: " + std::to_string(stats.minDepth) + " to " + 
+    //     std::to_string(stats.maxDepth));
+    // log("  Merge time: " + std::to_string(static_cast<int>(stats.mergeTimeMs)) + " ms");
     
 
 
@@ -227,37 +229,37 @@ int main(int argc, char* argv[]) {
     log("\nWriting outputs...");
     Timer writeTimer;
     
-    // try {
-    //     // Write deep output if requested
-    //     if (opts.deepOutput) {
-    //         std::string deepPath = opts.outputPrefix + "_merged.exr";
-    //         writeDeepEXR(merged, deepPath);
-    //         log("  Wrote: " + deepPath);
-    //     }
+    try {
+        // // Write deep output if requested
+        // if (opts.deepOutput) {
+        //     std::string deepPath = opts.outputPrefix + "_merged.exr";
+        //     writeDeepEXR(merged, deepPath);
+        //     log("  Wrote: " + deepPath);
+        // }
         
-    //     // Write flat EXR if requested
-    //     if (opts.flatOutput) {
-    //         std::string flatPath = opts.outputPrefix + "_flat.exr";
-    //         writeFlatEXR(flatRgba, merged.width(), merged.height(), flatPath);
-    //         log("  Wrote: " + flatPath);
-    //     }
+        // // Write flat EXR if requested
+        // if (opts.flatOutput) {
+        //     std::string flatPath = opts.outputPrefix + "_flat.exr";
+        //     writeFlatEXR(flatRgba, merged.width(), merged.height(), flatPath);
+        //     log("  Wrote: " + flatPath);
+        // }
         
-    //     // Write PNG if requested
-    //     if (opts.pngOutput) {
-    //         std::string pngPath = opts.outputPrefix + ".png";
+        // Write PNG if requested
+        if (opts.pngOutput) {
+            std::string pngPath = opts.outputPrefix + ".png";
             
-    //         if (hasPNGSupport()) {
-    //             writePNG(flatRgba, merged.width(), merged.height(), pngPath);
-    //             log("  Wrote: " + pngPath);
-    //         } else {
-    //             log("  Skipped PNG (libpng not available)");
-    //         }
-    //     }
+            if (hasPNGSupport()) {
+                writePNG(finalImage, 16, 16, pngPath);
+                log("  Wrote: " + pngPath);
+            } else {
+                log("  Skipped PNG (libpng not available)");
+            }
+        }
         
-    // } catch (const DeepWriterException& e) {
-    //     logError("Failed to write output: " + std::string(e.what()));
-    //     return 1;
-    // }
+    } catch (const DeepWriterException& e) {
+        logError("Failed to write output: " + std::string(e.what()));
+        return 1;
+    }
     
     // logVerbose("  Write time: " + writeTimer.elapsedString());
     

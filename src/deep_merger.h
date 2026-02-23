@@ -10,10 +10,9 @@
 
 
 struct RawSample {
-    float r, g, b, a, z;
+    float r, g, b, a, z, z_back;
     // For volumetric splitting, you might need z_back. 
-    // If your files don't have it, z_back is often just z.
-    float z_back; 
+
 
     // Used for std::sort
     bool operator<(const RawSample& other) const {
@@ -22,6 +21,8 @@ struct RawSample {
     }
 };
 
+
+// Takes raw sample data from multiple input rows for a single pixel, merges them, and writes to the output row
 void mergePixelsDirect(
     int x, int y,
     const std::vector<const float*>& pixelDataPtrs,
@@ -38,11 +39,10 @@ void mergePixelsDirect(
         unsigned int count = pixelSampleCounts[i];
 
         for (unsigned int s = 0; s < count; ++s) {
-            // Offset: sample_index * 5 channels
-            const float* sData = data + (s * 5);
-            // Assuming order: R, G, B, A, Z
-            // Note: If your EXR has 'ZBack', you'd read 6 channels instead of 5
-            staging.push_back({sData[0], sData[1], sData[2], sData[3], sData[4], sData[4]});
+            // Offset: sample_index * 6 channels
+            const float* sData = data + (s * 6);
+            // Assuming order: R, G, B, A, Z, zback
+            staging.push_back({sData[0], sData[1], sData[2], sData[3], sData[4], sData[5]}); // Using Z for ZBack as well if not present
         }
     }
 
@@ -52,21 +52,21 @@ void mergePixelsDirect(
     }
 
     // 2. [Your Volumetric Splitting/Sorting Logic Here]
-    // Use 'staging' instead of 'allSamples'
     std::sort(staging.begin(), staging.end());
 
     // 3. Write results back to the outputRow
-    // We need to know where this pixel starts in the outputRow.allSamples
+
      float* outPtr = outputRow.getPixelData(x); 
     
     // For this example, let's just write the sorted samples back
     for (size_t s = 0; s < staging.size(); ++s) {
-        float* dest = outPtr + (s * 5);
+        float* dest = outPtr + (s * 6); 
         dest[0] = staging[s].r;
         dest[1] = staging[s].g;
         dest[2] = staging[s].b;
         dest[3] = staging[s].a;
         dest[4] = staging[s].z;
+        dest[5] = staging[s].z_back; // If you have ZBack, write it here
     }
 
     // Update the output sample count for this pixel

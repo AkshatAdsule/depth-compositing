@@ -19,24 +19,47 @@ struct DeepRow {
     // Normal Allocate given a size
     void allocate(size_t width, int maxSamples) {
         this->width = width;
-        ensureCapacity((size_t)maxSamples * 5);
+        ensureCapacity((size_t)maxSamples * 6);
         sampleCounts.assign(width, 0); 
     }
 
 
-    // writes data from the input files directly into the output row's memory
+    // Allocate full block based on actual sample counts for the row
     void allocate(size_t width, const unsigned int* counts) {
+        if (allSamples != nullptr) {
+            delete[] allSamples; // FREE OLD ROW DATA
+            allSamples = nullptr;
+            printf("Warning: Re-allocating DeepRow for width %zu. Previous data has been freed.\n", width);
+        }
         this->width = width;
-        sampleCounts.assign(counts, counts + width);
+        sampleCounts.assign(counts, counts + width); // Copy counts into the vector
         totalSamplesInRow = 0;
         for(auto c : sampleCounts) totalSamplesInRow += c;
         
-        // Allocate one contiguous block for all RGBAZ data
-        // 5 channels: R, G, B, A, Z
-        allSamples = new float[totalSamplesInRow * 5];
-        currentCapacity = totalSamplesInRow * 5;
+        // Allocate one contiguous block for all RGBAZ data in this row
+        allSamples = new float[totalSamplesInRow * 6]; // Full Block Allocation
+        currentCapacity = totalSamplesInRow * 6;
+        printf("Allocated DeepRow: width=%zu, totalSamples=%zu, capacity=%zu\n", width, totalSamplesInRow, currentCapacity);
     }
-    
+
+    // Get pointer to the nth sample of pixel x
+     float* getSampleData(int x, int n) const {
+        // 1. Find the start of pixel x (same logic as getPixelData)
+        size_t pixelStartOffset = 0;
+        for (int i = 0; i < x; ++i) {
+            pixelStartOffset += sampleCounts[i];
+        }
+
+        // 2. Bounds check: ensure the nth sample actually exists for this pixel
+        if (n >= static_cast<int>(sampleCounts[x])) {
+            return nullptr; // Or handle error: requested sample index out of range
+        }
+
+        // 3. Final Offset: (Start of Pixel + n samples) * 6 channels
+        size_t finalOffset = (pixelStartOffset + n) * 6;
+
+        return allSamples + finalOffset;
+    }
 
 
     const float* getPixelData(int x) const {
@@ -44,15 +67,15 @@ struct DeepRow {
         for (int i = 0; i < x; ++i) {
             offset += sampleCounts[i];
         }
-        // Multiply by 5 because of RGBAZ interleaving
-        return allSamples + (offset * 5);
+        // Multiply by 6 because of RGBAZ interleaving
+        return allSamples + (offset * 6);
     }
 
     // Non-const version for writing
     float* getPixelData(int x) {
         size_t offset = 0;
         for (int i = 0; i < x; ++i) offset += sampleCounts[i];
-        return allSamples + (offset * 5);
+        return allSamples + (offset * 6);
     }
 
     unsigned int getSampleCount(int x) const {
@@ -81,40 +104,35 @@ private:
 
 // enum class RowStatus { Empty, Loaded, Merged, Written };
 
-void flattenRow(const DeepRow& deepRow, std::vector<float>& rgbOutput) {
-    float* samplePtr = deepRow.allSamples;
-
+void flattenRow(const DeepRow& deepRow, std::vector<float>& rgbaOutput) {
     for (int x = 0; x < deepRow.width; ++x) {
-        float accR = 0, accG = 0, accB = 0, accA = 0;
+        const float* pixelData = deepRow.getPixelData(x);
         int numSamples = deepRow.sampleCounts[x];
 
+        float accR = 0, accG = 0, accB = 0, accA = 0;
+
         for (int s = 0; s < numSamples; ++s) {
-            float r = samplePtr[0];
-            float g = samplePtr[1];
-            float b = samplePtr[2];
-            float a = samplePtr[3];
-            // Depth (samplePtr[4]) is used for sorting, but not for the Over math
+            const float* sPtr = pixelData + (s * 6);
 
-            // Front-to-Back "Over" Operator
-            float weight = a * (1.0f - accA);
-            accR += r * weight;
-            accG += g * weight;
-            accB += b * weight;
-            accA += weight;
+            float r = sPtr[0];
+            float g = sPtr[1];
+            float b = sPtr[2];
+            float a = sPtr[3];
 
-            samplePtr += 5; // Move to next interleaved sample
+            // Standard Front-to-Back "Over"
+            float weight = (1.0f - accA);
+            accR += r * a * weight; // Premultiply here if not already
+            accG += g * a * weight;
+            accB += b * a * weight;
+            accA += a * weight;
 
-            if (accA >= 0.999f) {
-                // Optimization: If we are fully opaque, 
-                // skip the rest of the samples for this pixel
-                samplePtr += (numSamples - 1 - s) * 5;
-                break;
-            }
+            if (accA >= 0.999f) break;
         }
-        
-        // Store in a standard 3-channel RGB buffer
-        rgbOutput[x * 3 + 0] = accR;
-        rgbOutput[x * 3 + 1] = accG;
-        rgbOutput[x * 3 + 2] = accB;
+
+        // Store as RGBA (4 channels)
+        rgbaOutput[x * 4 + 0] = accR;
+        rgbaOutput[x * 4 + 1] = accG;
+        rgbaOutput[x * 4 + 2] = accB;
+        rgbaOutput[x * 4 + 3] = accA;
     }
 }

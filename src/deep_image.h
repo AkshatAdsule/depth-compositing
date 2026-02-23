@@ -233,7 +233,8 @@ public:
         Imath::Box2i dw = file_.header().dataWindow();
         width_  = dw.max.x - dw.min.x + 1;
         height_ = dw.max.y - dw.min.y + 1;
-        
+        printf("Loaded Deep EXR: %s (%dx%d)\n", filename.c_str(), width_, height_);
+        printf("Number of parts in file: %d\n", file_.header().hasType());
         // We can verify if it's deep, though DeepScanLineInputFile 
         // will throw an error if you point it at a non-deep file anyway.
     }
@@ -246,25 +247,46 @@ public:
 
     // Temporary buffer for sample counts of a single row
     const unsigned int* getSampleCountsForRow(int y) {
-        loadRowCounts(y);
-        return &tempSampleCounts[0];  // return pointer to the start of the row's sample counts
+        fetchSampleCounts(y);
+        return tempSampleCounts.data();  // return pointer to the start of the row's sample counts
     }
 
-    void loadRowCounts(int y) {
+    /**
+     * This function uses the OpenEXR IMF library to efficiently load deep image data:
+     * - Resizes the temporary buffer to accommodate one row of sample count integers
+     * - Calculates the byte offset corresponding to the requested row
+     * - Configures a DeepFrameBuffer with a sample count slice pointing to the appropriate
+     *   memory location using pointer arithmetic
+     * - Reads only the sample counts (not the actual sample data) for the specified row
+     * 
+     * The pointer arithmetic adjusts the base memory address by the total offset so that
+     * the IMF library can correctly map pixel coordinates to buffer locations.
+     * 
+ 
+     */
+    void fetchSampleCounts(int y) {
         // Resize buffer to fit one row of integers
         tempSampleCounts.resize(width_);
-        size_t totalOffset = static_cast<size_t>(y) * width_ * sizeof(unsigned int);
+
+        Imath::Box2i dw = file_.header().dataWindow();
+        int minX = dw.min.x;
 
         Imf::DeepFrameBuffer countBuffer;
-        countBuffer.insert("sampleCount", Imf::DeepSlice(
+        // We point to the start of our vector, but tell OpenEXR 
+        // that this memory represents pixel (minX, y)
+        char* base = (char*)(tempSampleCounts.data()) 
+                    - (minX * sizeof(unsigned int)); 
+                    // Note: We don't subtract y because we only read one row (y, y)
+
+        countBuffer.insertSampleCountSlice(Imf::Slice(
             Imf::UINT, 
-            (char*)(&tempSampleCounts[0] - totalOffset), // The pointer trick
-            sizeof(unsigned int),                       // x-stride
-            sizeof(unsigned int) * width_               // y-stride
+            base, 
+            sizeof(unsigned int), // xStride
+            0                     // yStride (0 because we read 1 row)
         ));
 
         file_.setFrameBuffer(countBuffer);
-        file_.readPixelSampleCounts(y, y); // Error here 
+        file_.readPixelSampleCounts(y, y);
     }
 
 private:

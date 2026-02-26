@@ -53,57 +53,11 @@ std::vector<float> processAllEXR(const Options& opts){
     
     std::vector<std::unique_ptr<DeepInfo>> imagesInfo;
     int numFiles = opts.inputFiles.size();
-     // Track status of each row for synchronization
-
-
-
-    // images.reserve(opts.inputFiles.size());
-    
-
-    // Move into a new for pipeline functionality
-
-    // 1. Load deep EXR files into DeepImage objects
-    // 2. Merge samples across images based on depth proximity
-    // 3. Output merged deep EXR, flattened EXR, and PNG preview
-
-
-
-    // Imath::Box2i dw = file.header().dataWindow();
-
-    //             const Imf::ChannelList& channels = file.header().channels();
-    //             bool hasR = channels.findChannel("R") != nullptr;
-    //             bool hasG = channels.findChannel("G") != nullptr;
-    //             bool hasB = channels.findChannel("B") != nullptr;
-    //             bool hasA = channels.findChannel("A") != nullptr;
-    //             bool hasZ = channels.findChannel("Z") != nullptr;
-    //             bool hasZBack = channels.findChannel("ZBack") != nullptr;
-
-    //             if (!hasZBack) {
-    //                 logError("Warning: File " + std::to_string(i) + " is missing ZBack channel. This may cause compositing artifacts.");
-    //             }
-
-    //             if (!hasR || !hasG || !hasB || !hasA || !hasZ) {
-    //                 std::string missing;
-    //                 if (!hasR) missing += "R ";
-    //                 if (!hasG) missing += "G ";
-    //                 if (!hasB) missing += "B ";
-    //                 if (!hasA) missing += "A ";
-    //                 if (!hasZ) missing += "Z ";
-    //                 throw DeepReaderException("Missing required channels: " + missing);
-    //             }
 
     // ========================================================================
     // Preload stage - validate files and load metadata
     // ========================================================================
 
-    // show_console_cursor(false);
-    // BlockProgressBar bar{option::BarWidth{80},
-    //                      option::Start{"["},
-    //                      option::End{"]"},
-    //                      option::ShowPercentage{true},
-    //                      option::ShowElapsedTime{true},
-    //                      option::ShowRemainingTime{true},
-    //                      option::MaxProgress{3}};
     printf("Preloading input files... \n");
      for (size_t i = 0; i < opts.inputFiles.size(); ++i) {
 
@@ -174,11 +128,19 @@ std::vector<float> processAllEXR(const Options& opts){
     std::atomic<int> next_scanline{0};
     std::atomic<int> scanlines_completed{0};
 
-    std::mutex merge_mutex; // For synchronizing progress bar updates
+   
 
     std::vector<std::atomic<int>> rowStatus(imagesInfo[0]->height());
     std::vector<std::vector<DeepRow>> m_inputBuffer;
     std::vector<DeepRow> m_mergedBuffer;
+
+     std::mutex merge_mutex; // For synchronizing progress bar updates
+
+    // Initialize all row statuses to EMPTY (0)
+    std::vector<std::atomic<int>> rowStatus(height);
+    for (int i = 0; i < height; ++i) {
+        rowStatus[i].store(EMPTY);
+    }
 
     m_mergedBuffer.resize(windowSize); // One slot per scanline in the sliding window
 
@@ -205,149 +167,111 @@ std::vector<float> processAllEXR(const Options& opts){
     //                      option::MaxProgress{3}};
 
     auto loader_worker = [&]() {
-        printf("Loading EXR data in chunks of %d scanlines...\n", chunkSize);
-        for (int yStart = 0; yStart < height; yStart += chunkSize) {
-            int yEnd = std::min(yStart + chunkSize - 1, height - 1);
+        // printf("Loading EXR data in chunks of %d scanlines...\n", chunkSize);
+        int load_y = 0;
+        while (load_y < height) {
+            int slot = load_y % windowSize;
 
-            // 1. Yield until window gets updated
-            if (yStart >= windowSize) {
-                while (rowStatus[yStart - windowSize].load() < 3 /* Written */) {
+            // Yeild if y-windowSize hasn't been merged and written yet, meaning the merger worker hasn't caught up to the loader
+        
+            //  Prevent processing more than 16 files
+            if (load_y >= windowSize) {
+                while (rowStatus[load_y - windowSize].load() < FLATTENED) {
                     std::this_thread::yield(); 
                 }
             }
 
+
             // 2. LOAD CHUNK FROM EACH FILE
             for (int i = 0; i < numFiles; ++i) {
-                Imf::DeepScanLineInputFile& file = imagesInfo[i]->getFile(); // The Imf::DeepScanLineInputFile
-                
+                Imf::DeepScanLineInputFile& file = imagesInfo[i]->getFile(); // The Imf::DeepScanLineInputFile 
+                DeepRow& row = m_inputBuffer[i][slot]; // Gets the index where we will write data
+              
+                printf("Row: %d sample counts: ", load_y);
 
-                
-                for (int y = yStart; y <= yEnd; ++y) {
-
-                   
-
-                    int slot = y % windowSize; // Wrapping slot index for the sliding window
-
-                    DeepRow& row = m_inputBuffer[i][slot]; // Gets the index where we will write data
-                    
-                    // Fetch the counts OpenEXR just read for this specific row
-                    printf("Row: %d sample counts: ", y);
-
-                     // Goes through all X and loads the data into the 
-                    // imagesInfo[i]->loadSampleCounts(y); 
-
-                    // Loads row and gets the numbers corresponding to how many samples are in each pixel of that row
-                    const unsigned int* tempCounts = imagesInfo[i]->getSampleCountsForRow(y);
-
-                    // DEBUG PRINT
-                    // printf("File %d, Row %d: tempCounts pointer is %p\n", i, y, (void*)tempCounts);
-
-                    if (tempCounts == nullptr) {
-                        printf("ERROR: rowCounts is NULL! The previous loadSampleCounts(y) failed or wasn't saved.\n");
-                        // This will cause the segfault if we continue
-                    }
-
-        
-                    // Custom allocation at the rowCounts pointer
-                    row.allocate(width, tempCounts); // Allocates space based on how big that row is
-
-                    
-
-
-                    char* permanentCountPtr = (char*)row.sampleCounts.data();
-                    
-                    // Offset the pointer so row Y writes to index 0
-                    char* basePtr = (char*)(row.allSamples);  // Location of block of memory
-
-                    if (row.allSamples == nullptr) {
-                        printf("FATAL: row.allSamples is NULL for Row %d even though samples > 0!\n", y);
-                    } else {
-
-                        printf("Row %d: basePtr %p is writeable. Capacity: %zu floats\n", 
-                                y, (void*)row.allSamples, row.currentCapacity);
-                    }
-                        
-                    
-
-                    size_t sampleStride = 6 * sizeof(float);
-                    size_t xStride = 0; // Since we're using a single contiguous block, xStride is 0
-                    size_t yStride = 0; // Since we're using a single contiguous block, yStride is 0
-                    size_t fSize = sizeof(float);
-
-
-                    std::vector<float*> rPtrs(width), gPtrs(width), bPtrs(width), 
-                    aPtrs(width), zPtrs(width), zbPtrs(width);
-
-                    float* currentPixelPtr = row.allSamples;
-                    for (int x = 0; x < width; ++x) {
-                        rPtrs[x]  = currentPixelPtr + 0; // Points to R
-                        gPtrs[x]  = currentPixelPtr + 1; // Points to G
-                        bPtrs[x]  = currentPixelPtr + 2; // Points to B
-                        aPtrs[x]  = currentPixelPtr + 3; // Points to A
-                        zPtrs[x]  = currentPixelPtr + 4; // Points to Z
-                        zbPtrs[x] = currentPixelPtr + 5; // Points to ZBack
-                        
-                        // Move to the next pixel: jump by (samples in this pixel * 6 channels)
-                        currentPixelPtr += row.sampleCounts[x] * 6;
-                    }
-
-
-                    std::vector<float*> pixelPointers(width);
-                    // float* currentPixelPtr = row.allSamples;
-                    // for (int x = 0; x < width; ++x) {
-                    //     pixelPointers[x] = currentPixelPtr;
-                    //     currentPixelPtr += row.sampleCounts[x] * 6; // Move pointer by number of samples * channels
-                    // }
-
-                    Imf::DeepFrameBuffer frameBuffer; 
-
-                    frameBuffer.insertSampleCountSlice(Imf::Slice(
-                        Imf::UINT,
-                        (char*)row.sampleCounts.data(), 
-                        sizeof(unsigned int), // xStride: move to next int
-                        0                     // yStride: 0
-                    ));
-
-                    char* basePointers = (char*)pixelPointers.data();
-                    size_t ptrSize = sizeof(float*);
-
-
-                    xStride = sizeof(float*);
-
-                    frameBuffer.insert("R", Imf::DeepSlice(Imf::FLOAT, (char*)rPtrs.data(),  xStride, 0, sampleStride));
-                    frameBuffer.insert("G", Imf::DeepSlice(Imf::FLOAT, (char*)gPtrs.data(),  xStride, 0, sampleStride));
-                    frameBuffer.insert("B", Imf::DeepSlice(Imf::FLOAT, (char*)bPtrs.data(),  xStride, 0, sampleStride));
-                    frameBuffer.insert("A", Imf::DeepSlice(Imf::FLOAT, (char*)aPtrs.data(),  xStride, 0, sampleStride));
-                    frameBuffer.insert("Z", Imf::DeepSlice(Imf::FLOAT, (char*)zPtrs.data(),  xStride, 0, sampleStride));
-                    frameBuffer.insert("ZBack", Imf::DeepSlice(Imf::FLOAT, (char*)zbPtrs.data(), xStride, 0, sampleStride));
-
-                    // printf("Setting frame buffer ");
-                    printf("Attempting to read RGBAZ... \n");
-                    file.setFrameBuffer(frameBuffer);
-                    file.readPixels(y, y); 
-
-                    // Output first and last red sample data for this row
-                    // if (row.currentCapacity > 0) {
-                    //     float* firstSample = row.allSamples;
-                    //     float* lastSample = row.allSamples + (row.currentCapacity - 6);
-                    //     printf("File %d, Row %d: First R=%.3f, Last R=%.3f\n", 
-                    //            i, y, 
-                    //            firstSample[0],  // First sample's R value
-                    //            lastSample[0]);  // Last sample's R value
-                    // }
-                    std::this_thread::sleep_for(std::chrono::seconds(1)); // Simulate load time for testing
+                // Loads row and gets the numbers corresponding to how many samples are in each pixel of that row
+                const unsigned int* tempCounts = imagesInfo[i]->getSampleCountsForRow(load_y);
+                if (tempCounts == nullptr) {
+                    printf("ERROR: rowCounts is NULL! Expect strange behaviour.\n");
                 }
-            }
+                // Custom allocation at the rowCounts pointer
+                row.allocate(width, tempCounts); // Allocates space based on how big that row is
 
-            // Debug: Print RGBAZ values for second and last row of the chunk
-          
-            // 3. UPDATE STATUS: Mark all 16 rows as 'Loaded' (1)
-            for (int y = yStart; y <= yEnd; ++y) {
-                rowStatus[y].store(1); 
-                // loaded_scanlines.fetch_add(16);
+                char* permanentCountPtr = (char*)row.sampleCounts.data();
+                char* basePtr = (char*)(row.allSamples);  // Location of block of memory
+
+                if (row.allSamples == nullptr) {
+                    printf("FATAL: row.allSamples is NULL for Row %d even though samples > 0!\n", load_y);
+                } else {
+
+                    printf("Row %d: basePtr %p is writeable. Capacity: %zu floats\n", 
+                            load_y, (void*)row.allSamples, row.currentCapacity);
+                }
+                
+                size_t sampleStride = 6 * sizeof(float);
+                size_t xStride = 0; // Since we're using a single contiguous block, xStride is 0
+                size_t yStride = 0; // Since we're using a single contiguous block, yStride is 0
+                size_t fSize = sizeof(float);
+
+
+                std::vector<float*> rPtrs(width), gPtrs(width), bPtrs(width), 
+                aPtrs(width), zPtrs(width), zbPtrs(width);
+
+                float* currentPixelPtr = row.allSamples;
+                for (int x = 0; x < width; ++x) {
+                    rPtrs[x]  = currentPixelPtr + 0; // Points to R
+                    gPtrs[x]  = currentPixelPtr + 1; // Points to G
+                    bPtrs[x]  = currentPixelPtr + 2; // Points to B
+                    aPtrs[x]  = currentPixelPtr + 3; // Points to A
+                    zPtrs[x]  = currentPixelPtr + 4; // Points to Z
+                    zbPtrs[x] = currentPixelPtr + 5; // Points to ZBack
+                    
+                    // Move to the next pixel: jump by (samples in this pixel * 6 channels)
+                    currentPixelPtr += row.sampleCounts[x] * 6;
+                }
+
+
+                std::vector<float*> pixelPointers(width);
+                Imf::DeepFrameBuffer frameBuffer; 
+
+                frameBuffer.insertSampleCountSlice(Imf::Slice(
+                    Imf::UINT,
+                    (char*)row.sampleCounts.data(), 
+                    sizeof(unsigned int), // xStride: move to next int
+                    0                     // yStride: 0
+                ));
+
+                char* basePointers = (char*)pixelPointers.data();
+                size_t ptrSize = sizeof(float*);
+
+
+                xStride = sizeof(float*);
+
+                frameBuffer.insert("R", Imf::DeepSlice(Imf::FLOAT, (char*)rPtrs.data(),  xStride, 0, sampleStride));
+                frameBuffer.insert("G", Imf::DeepSlice(Imf::FLOAT, (char*)gPtrs.data(),  xStride, 0, sampleStride));
+                frameBuffer.insert("B", Imf::DeepSlice(Imf::FLOAT, (char*)bPtrs.data(),  xStride, 0, sampleStride));
+                frameBuffer.insert("A", Imf::DeepSlice(Imf::FLOAT, (char*)aPtrs.data(),  xStride, 0, sampleStride));
+                frameBuffer.insert("Z", Imf::DeepSlice(Imf::FLOAT, (char*)zPtrs.data(),  xStride, 0, sampleStride));
+                frameBuffer.insert("ZBack", Imf::DeepSlice(Imf::FLOAT, (char*)zbPtrs.data(), xStride, 0, sampleStride));
+
+                // printf("Setting frame buffer ");
+                printf("Attempting to read RGBAZ... \n");
+                file.setFrameBuffer(frameBuffer);
+                file.readPixels(load_y, load_y); 
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(500)); // Simulate load time for testing
+                // }
+                // y.fetch_add(1); // Update loaded scanline count for progress tracking
+                
             }
-            // printf("Progress: Loaded rows %d to %d\n", yStart, yEnd);
             
+
+            // Update status after N rows
+            rowStatus[load_y].store(LOADED);  // Update status to Loaded
+            loaded_scanlines.fetch_add(1); 
+
+            // Increment outer loop
+            load_y++;
         }
 
     };
@@ -363,35 +287,27 @@ std::vector<float> processAllEXR(const Options& opts){
                          option::ShowElapsedTime{true},
                          option::ShowRemainingTime{true},
                          option::MaxProgress{3}};
-    //m_inputBuffer
-    int yindex = 0;
-    int y= 0;
-    auto merger_worker = [&]() {
 
+    auto merger_worker = [&]() {
+        int merge_y = 0;
    
         printf("Merging scanlines in parallel...\n");
-        while (true) {
-
+        while (merge_y < height) {
             // Atomic "Grab" - Thread-safe row selection
-            // int y = next_scanline.fetch_add(1);
-            
-            if (y >= height) break;
 
-            while (rowStatus[y].load() < 1) { // 1 = Loaded
+            // Hard Coded safety in case it catches up. 
+            while (rowStatus[merge_y].load() < LOADED) { // Wait until the loader has loaded this row
                 std::this_thread::yield();
             }
 
-
-
-            int slot = y % windowSize;
-            printf("Merging row %d (slot %d)...\n", y, slot);
+            int slot = merge_y % windowSize;
+            printf("Merging row %d (slot %d)...\n", merge_y, slot);
   
             DeepRow& outputRow = m_mergedBuffer[slot];
             
             int totalPossibleSamplesInRow = 0;
-
-            
             int maxSamplesForPixel = 0;
+
             for (int i = 0; i < numFiles; ++i) {
                 // Worst case: Volumetric splitting could potentially double samples, 
                 // but let's start with the sum of all inputs.
@@ -399,9 +315,9 @@ std::vector<float> processAllEXR(const Options& opts){
             }
 
             // Safety buffer for volumetric splitting (e.g., 2x)
-            totalPossibleSamplesInRow += (maxSamplesForPixel * 1);  //! MIGHT NEED DELETION
+            totalPossibleSamplesInRow += (maxSamplesForPixel * 1);  
             printf("Row %d: Max samples for pixel = %d, Total possible samples in row = %d\n", 
-                    y, maxSamplesForPixel, totalPossibleSamplesInRow);
+                    merge_y, maxSamplesForPixel, totalPossibleSamplesInRow);
 
             // Now allocate the merged row once
             m_mergedBuffer[slot].allocate(width, totalPossibleSamplesInRow);
@@ -410,130 +326,74 @@ std::vector<float> processAllEXR(const Options& opts){
 
             // Process scanline x at a time to keep memory usage low and allow for early merging
             for (int x = 0; x < width; ++x) {
-                // Gather pixel pointers from all inputs
                 std::vector<const float*> pixelDataPtrs;
                 std::vector<unsigned int> pixelSampleCounts;
 
                 for (int i = 0; i < numFiles; ++i) {
                     DeepRow& inputRow = m_inputBuffer[i][slot];
-                    
-                    // Get pointer to the start of this pixel's samples
-                    // You'll need a helper in DeepRow to find the offset for pixel x
-                    pixelDataPtrs.push_back(inputRow.getPixelData(x));
+                    pixelDataPtrs.push_back(inputRow.getPixelData(x));  // 
                     pixelSampleCounts.push_back(inputRow.getSampleCount(x));
                 }
  
                 // Merge pixels
-
-                // Needs implementation of mergePixels that can take raw pointers and counts, and a merge threshold for merging nearby samples.
-                // float threshold = opts.enableMerging ? opts.mergeThreshold : 0.0f;
                 
-                // result.pixel(x, y) = mergePixels(pixelDataPtrs, pixelSampleCounts, threshold);
-                
-                mergePixelsDirect(x, y, pixelDataPtrs, pixelSampleCounts, outputRow);
+                mergePixelsDirect(x, merge_y, pixelDataPtrs, pixelSampleCounts, outputRow);
                 
             }
 
 
-            rowStatus[y].store(2); // Mark as Merged
-            // merged_scanlines.fetch_add(1); // Update merged scanline count for progress tracking
-            // Thread-safe progress update
-            // int done = scanlines_completed.fetch_add(1) + 1;
-            // printf("\rMerging: %d/%d rows completed", y + 1, height);
-            // printf("Row merged with capacity for %zu samples\n", outputRow.currentCapacity / 6);
-            // // {
-            //     std::lock_guard<std::mutex> lock(merge_mutex);
-            // geBar.set_progress(static_cast<double>(done) / height);
-            y++;
-            // }
-            // if (outputRow.currentCapacity > 0) {
-            //     float* firstSample = outputRow.allSamples;
-            //     float* lastSample = outputRow.allSamples + (outputRow.currentCapacity - 6);
-            //     printf("Row %d: First G=%.3f, Last R=%.3f\n", 
-            //             y, 
-            //             firstSample[1],  // First sample's G value
-            //             lastSample[0]);  // Last sample's R value
-            // }
+            rowStatus[merge_y].store(MERGED); // Mark as Merged
+
+            merge_y ++;
+            std::this_thread::sleep_for(std::chrono::milliseconds(500)); // Simulate merge time for testing
+            
         }
     
-    // printf("\nMerging completed.\n");
-    // printf("Merged Buffer Size: %zu rows\n", m_mergedBuffer.size());
-    // for (int i = 0; i < height; ++i) {
-    //     float* sample = m_mergedBuffer[i].getSampleData(0, 0);
-    //     if (sample) {
-    //         printf("Row %d: First sample G=%.3f\n", i, sample[1]);
-    //         printf("Row %d: Samples at 0: %zu samples\n", i, m_mergedBuffer[i].getSampleCount(0));
-    //     } else {
-    //         printf("Row %d: No samples available\n", i);
-    //     }
+
     // }
     };
 
-    // int lastRowIdx = height - 1;
-    // printf("\n=== DEBUG: ROW %d FULL DATA ===\n", lastRowIdx);
-
-    // for (int x = 0; x < width; ++x) {
-    //     int numSamples = (int)m_mergedBuffer[lastRowIdx].getSampleCount(x);
-    //     printf("Pixel %d (%d samples): ", x, numSamples);
-        
-    //     for (int s = 0; s < numSamples; ++s) {
-    //         float* d = m_mergedBuffer[lastRowIdx].getSampleData(x, s);
-    //         // Print all 6 values: R, G, B, A, Z, ZBack
-    //         printf("\n  S%d: [%.3f, %.3f, %.3f, %.3f, %.3f, %.3f]", 
-    //             s, d[0], d[1], d[2], d[3], d[4], d[5]);
-    //     }
-    //     printf("\n");
-    // }
-    // printf("===============================\n");
-    
 
 
     // ========================================================================
     // Stage 3 Write - Save lines in chunks of 16
     // ========================================================================
 
-    // BlockProgressBar writeBar{option::BarWidth{80},
-    //                      option::Start{"["},
-    //                      option::End{"]"},
-    //                      option::ShowPercentage{true},
-    //                      option::ShowElapsedTime{true},
-    //                      option::ShowRemainingTime{true},
-    //                      option::MaxProgress{3}};
-
-    
+    std::vector<float> finalImage(width * height * 4, 0.0f); // RGBA output buffer
     auto writer_worker = [&]() {
 
-        std::vector<float> finalImage(width * height * 4, 0.0f);
+        int write_y = 0;
 
-        for (int y = 0; y < height; ++y) {
-            // 1. WAIT: Ensure Merger has finished this row
-            // We are looking for Status 2 (Merged)
-            while (rowStatus[y].load() < 2) {
+        while (write_y < height) {
+
+            // Ensure Merger has finished this row
+            while (rowStatus[write_y].load() < MERGED) {
                 std::this_thread::yield();
             }
 
-            int slot = y % windowSize;
+            int slot = write_y % windowSize;
             const DeepRow& deepRow = m_mergedBuffer[slot];
 
-            // 2. FLATTEN: Convert merged deep data to flat RGBA
+            // FLATTEN: Convert merged deep data to flat RGBA
             std::vector<float> rowRGB(width * 4);
-
-            // 4. EXECUTE YOUR FUNCTION
             flattenRow(deepRow, rowRGB);
 
+            std::copy(rowRGB.begin(), rowRGB.end(), finalImage.begin() + (write_y * width * 4)); // 4 channels (RGBA)
 
-            std::copy(rowRGB.begin(), rowRGB.end(), finalImage.begin() + (y * width * 4)); // 4 channels (RGBA)
 
-
-            const_cast<DeepRow&>(deepRow).clear();
-
-            rowStatus[y].store(3);
+            const_cast<DeepRow&>(deepRow).clear();            
             
-            printf("\rWriting: %d/%d rows completed", y + 1, height);
+            
+           
+            // Update status and progress bar
+            printf("\rWriting: %d/%d rows completed", write_y + 1, height);
+            rowStatus[write_y].store(FLATTENED); // Set back to Loaded so loader can reuse the slot for the next row
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            write_y++;
         }
 
         // Return the final flattened image data as a vector of floats (RGB interleaved)
-        return finalImage;
+        
     };
 
     
@@ -545,24 +405,24 @@ std::vector<float> processAllEXR(const Options& opts){
     
     
     std::vector<std::thread> threads;
-    // threads.emplace_back(loader_worker);
-    // threads.emplace_back(merger_worker);
-    // threads.emplace_back(writer_worker);
-
-    // for (int t = 0; t < thread_count; ++t) {
-    //     threads.emplace_back(render_worker);
-    // }
+    threads.emplace_back(loader_worker);
+    threads.emplace_back(merger_worker);
+    threads.emplace_back(writer_worker);
 
     // Wait for all threads to complete
     for (auto& thread : threads) {
-        thread.join();
+        if (thread.joinable()) {
+            thread.join();
+        }
     }
 
+    printf("\nPipeline complete!\n");
+    return finalImage;
 
 
-    show_console_cursor(true);
-    std::vector<float> result; // At the very end read from the merged DeepImage and return the flattened RGBA data as a vector of floats
-    return result;
+    // show_console_cursor(true);
+    // std::vector<float> result; // At the very end read from the merged DeepImage and return the flattened RGBA data as a vector of floats
+    // return result;
 
 
     
